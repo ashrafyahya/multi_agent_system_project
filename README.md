@@ -30,7 +30,7 @@ The system uses LangGraph to orchestrate these agents through a stateful workflo
 
 ## Architecture
 
-![](diagrams/system_overview.png)
+![](images/system_overview.png)
 
 ### Key Components
 
@@ -251,7 +251,7 @@ If validation fails at any stage:
 
 The Supervisor Agent acts as the quality control and workflow coordinator:
 
-![](diagrams/supervisor_agent_flow.png)
+![](images/supervisor_agent_flow.png)
 
 **Supervisor Responsibilities:**
 - ✅ Validates outputs from Collector, Insight, and Report agents

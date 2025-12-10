@@ -44,7 +44,7 @@ The **Competitor Analysis Multi-Agent System** automates this entire process usi
 - ✅ **Quality validation** at every step
 - ✅ **Automatic retry** for reliability
 
-![](diagrams/manual_work_vs_automated_work.jpg)
+![](images/manual_work_vs_automated_work.jpg)
 
 
 ### Why It's Revolutionary
@@ -118,7 +118,7 @@ python -m src.main "Analyze competitor positioning in the AI chatbot market and 
 
 ### 📊 Industry Applications
 
-![](diagrams/use_cases.png)
+![](images/use_cases.png)
 
 ---
 
@@ -170,7 +170,7 @@ print(result["report"])
 
 #### Example 1: Market Entry Analysis  
 
-![](diagrams/market_entry_analysis.png) 
+![](images/market_entry_analysis.png) 
 
 **Query**: "Analyze the top 5 competitors in the AI code assistant market. Focus on pricing, features, and market positioning. Provide recommendations for market entry."
 
@@ -180,7 +180,7 @@ print(result["report"])
 
 #### Example 2: Competitive Intelligence  
 
-![](diagrams/competitive_intelligence.png) 
+![](images/competitive_intelligence.png) 
 
 **Query**: "Compare pricing strategies of CRM competitors: Salesforce, HubSpot, and Pipedrive. Analyze their target markets and feature sets."
 
@@ -190,7 +190,7 @@ print(result["report"])
 
 #### Example 3: Investment Research  
 
-![](diagrams/investment_research.png) 
+![](images/investment_research.png) 
 
 **Query**: "Provide comprehensive analysis of the fintech payment processing market. Include market size, key players, trends, and opportunities."
 
@@ -207,7 +207,7 @@ The system generates multiple output formats:
 3. **SWOT Diagram**: Visual SWOT analysis
 4. **Trends Chart**: Visual trend representation
 
-![](diagrams/output_format.png)
+![](images/output_format.png)
 
 ### 🔍 Verbose Logging
 
@@ -230,7 +230,7 @@ LOG_LEVEL=DEBUG
 
 The system uses a **multi-agent architecture** built on **LangGraph**, where specialized AI agents collaborate through a stateful workflow.
 
-![](diagrams/system_overview.png)
+![](images/system_overview.png)
 
 ### 🔧 Technology Stack
 
@@ -256,7 +256,7 @@ The system uses a **multi-agent architecture** built on **LangGraph**, where spe
 
 Each agent is a **specialized AI component** with a specific role:
 
-![](diagrams/agents_architecture.png)
+![](images/agents_architecture.png)
 
 ### 📋 System Requirements
 
@@ -283,7 +283,7 @@ Each agent is a **specialized AI component** with a specific role:
 
 The system uses **LangGraph's StateGraph** to orchestrate agent interactions:
 
-![](diagrams/workflow_architecture.png)
+![](images/workflow_architecture.png)
 
 ---
 
@@ -293,7 +293,7 @@ The system uses **LangGraph's StateGraph** to orchestrate agent interactions:
 
 The complete execution flow from user query to final report:
 
-![](diagrams/excution_pipline.png)
+![](images/excution_pipline.png)
 
 ### 📝 Code Structure
 
@@ -358,7 +358,7 @@ Validators return structured `ValidationResult` objects instead of raising excep
 
 The Supervisor Agent acts as the quality control and workflow coordinator, checking the work of other agents:
 
-![](diagrams/supervisor_agent_flow.png)  
+![](images/supervisor_agent_flow.png)  
 
 **Supervisor Responsibilities:**
 - ✅ **Validates outputs** from Collector, Insight, and Report agents
@@ -373,7 +373,7 @@ The workflow uses a **TypedDict** (`WorkflowState`) for type-safe state manageme
 
 **State Evolution**:
 
-![](diagrams/state_evolution.png)
+![](images/state_evolution.png)
 
 ---
 
@@ -383,13 +383,13 @@ The workflow uses a **TypedDict** (`WorkflowState`) for type-safe state manageme
 
 The system implements **defense in depth** with multiple error handling layers:
 
-![](diagrams/multi_layer_error_handling.png)
+![](images/multi_layer_error_handling.png)
 
 ### 🔄 Retry Mechanism
 
 The system implements **intelligent retry logic** with query improvement:
 
-![](diagrams/retry_mechanism.png)
+![](images/retry_mechanism.png)
 
 ### 📊 Retry Strategy Details
 
@@ -429,7 +429,7 @@ When retrying, the system progressively improves queries. For example: "Find com
 
 ### 🎯 Error Recovery Flow
 
-![](diagrams/error_recovery_flow.png)
+![](images/error_recovery_flow.png)
 
 ### 📈 Error Metrics & Monitoring
 
