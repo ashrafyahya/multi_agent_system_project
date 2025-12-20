@@ -28,6 +28,7 @@ from langchain_groq import ChatGroq
 from src.config import get_config
 from src.graph.state import WorkflowState, create_initial_state
 from src.graph.workflow import create_workflow
+from src.utils.agent_logger import AgentLogger
 
 # Configure logging
 logging.basicConfig(
@@ -37,11 +38,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def initialize_llm(config: Any) -> ChatGroq:
+def initialize_llm(config: Any, model_name: str | None = None) -> ChatGroq:
     """Initialize Groq LLM with configuration.
     
     Args:
         config: Config instance from get_config()
+        model_name: Optional model name. If not provided, uses config.llm_model
     
     Returns:
         Initialized ChatGroq LLM instance
@@ -55,16 +57,68 @@ def initialize_llm(config: Any) -> ChatGroq:
         llm = initialize_llm(config)
         ```
     """
-    logger.info(f"Initializing Groq LLM with model: {config.groq_model}")
+    # Priority: model_name > llm_model
+    model = model_name or config.llm_model
+    logger.info(f"Initializing Groq LLM with model: {model}")
     
     llm = ChatGroq(
         api_key=config.groq_api_key,
-        model=config.groq_model,
+        model=model,
         temperature=0,  # Default temperature, can be overridden per agent
     )
     
     logger.info("LLM initialized successfully")
     return llm
+
+
+def initialize_llms_for_agents(config: Any) -> dict[str, ChatGroq]:
+    """Initialize LLM instances for all agents based on configuration.
+    
+    Creates a dictionary mapping agent names to their LLM instances.
+    Reuses LLM instances when multiple agents use the same model.
+    
+    Args:
+        config: Config instance from get_config()
+    
+    Returns:
+        Dictionary mapping agent names to ChatGroq instances:
+        {"planner": llm_instance, "supervisor": llm_instance, ...}
+    
+    Example:
+        ```python
+        from src.config import get_config
+        from src.main import initialize_llms_for_agents
+        
+        config = get_config()
+        agent_llms = initialize_llms_for_agents(config)
+        planner_llm = agent_llms["planner"]
+        ```
+    """
+    agent_names = ["planner", "supervisor", "insight", "report", "collector", "export"]
+    
+    # Get model for each agent
+    agent_models: dict[str, str] = {}
+    for agent_name in agent_names:
+        model = config.get_model_for_agent(agent_name)
+        agent_models[agent_name] = model
+        logger.debug(f"Agent '{agent_name}' will use model: {model}")
+    
+    # Create unique LLM instances per model (reuse instances for same model)
+    model_to_llm: dict[str, ChatGroq] = {}
+    agent_llms: dict[str, ChatGroq] = {}
+    
+    for agent_name, model_name in agent_models.items():
+        if model_name not in model_to_llm:
+            logger.info(f"Creating LLM instance for model: {model_name}")
+            model_to_llm[model_name] = ChatGroq(
+                api_key=config.groq_api_key,
+                model=model_name,
+                temperature=0,  # Default, can be overridden per agent
+            )
+        agent_llms[agent_name] = model_to_llm[model_name]
+        logger.info(f"Agent '{agent_name}' assigned model: {model_name}")
+    
+    return agent_llms
 
 
 def run_analysis(
@@ -122,13 +176,21 @@ def run_analysis(
             logger.error(f"Failed to load configuration: {e}")
             raise RuntimeError(f"Configuration loading failed: {e}") from e
     
-    # Initialize LLM if not provided
+    # Initialize LLMs for agents if not provided
+    agent_llms: dict[str, ChatGroq] | None = None
     if llm is None:
         try:
-            llm = initialize_llm(config)
+            agent_llms = initialize_llms_for_agents(config)
+            llm = agent_llms.get("planner", initialize_llm(config))
         except Exception as e:
-            logger.error(f"Failed to initialize LLM: {e}")
+            logger.error(f"Failed to initialize LLMs: {e}")
             raise RuntimeError(f"LLM initialization failed: {e}") from e
+    
+    # Initialize agent logger
+    agent_logger = AgentLogger(
+        log_dir=config.agent_log_dir,
+        enabled=config.agent_log_enabled
+    )
     
     # Prepare workflow configuration
     workflow_config = {
@@ -139,9 +201,12 @@ def run_analysis(
         "collector_temperature": 0,
         "insight_temperature": 0.7,
         "report_temperature": 0.7,
+        "agent_logger": agent_logger,
     }
     
-    # Create workflow
+    if agent_llms:
+        workflow_config["agent_llms"] = agent_llms
+    
     try:
         logger.info("Creating workflow...")
         workflow = create_workflow(llm=llm, config=workflow_config)
@@ -150,7 +215,6 @@ def run_analysis(
         logger.error(f"Failed to create workflow: {e}", exc_info=True)
         raise RuntimeError(f"Workflow creation failed: {e}") from e
     
-    # Create initial state
     try:
         initial_state = create_initial_state(user_query)
         logger.info(f"Starting analysis for query: {user_query[:100]}...")
@@ -158,7 +222,6 @@ def run_analysis(
         logger.error(f"Failed to create initial state: {e}")
         raise RuntimeError(f"State creation failed: {e}") from e
     
-    # Execute workflow
     try:
         logger.info("Executing workflow...")
         final_state = workflow.invoke(initial_state)
@@ -167,7 +230,6 @@ def run_analysis(
         logger.error(f"Workflow execution failed: {e}", exc_info=True)
         raise RuntimeError(f"Workflow execution failed: {e}") from e
     
-    # Log results
     if final_state.get("report"):
         logger.info(
             f"Analysis completed successfully. Report length: "
@@ -226,10 +288,8 @@ Examples:
         logger.debug("Verbose logging enabled")
     
     try:
-        # Run analysis
         result = run_analysis(args.query)
         
-        # Print results
         if result.get("report"):
             print("\n" + "=" * 80)
             print("COMPETITOR ANALYSIS REPORT")
@@ -237,7 +297,6 @@ Examples:
             print(result["report"])
             print("\n" + "=" * 80)
             
-            # Print export paths if available
             export_paths = result.get("export_paths")
             if export_paths:
                 print("\nExport Files Generated:")

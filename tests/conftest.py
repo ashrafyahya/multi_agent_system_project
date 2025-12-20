@@ -24,11 +24,18 @@ def mock_config() -> Mock:
     """Create a mock Config instance."""
     config = Mock(spec=Config)
     config.groq_api_key = "test_api_key"
-    config.groq_model = "llama-3.1-8b-instant"
+    config.llm_model = "llama-3.1-8b-instant"
     config.max_retries = 3
     config.log_level = "INFO"
     config.data_dir = None
     config.tavily_api_key = None
+    config.llm_model_planner = None
+    config.llm_model_supervisor = None
+    config.llm_model_insight = None
+    config.llm_model_report = None
+    config.llm_model_collector = None
+    config.llm_model_export = None
+    config.get_model_for_agent = Mock(return_value="llama-3.1-8b-instant")
     return config
 
 

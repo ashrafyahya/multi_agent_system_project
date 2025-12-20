@@ -927,7 +927,7 @@ class TestRetryNode:
     
     def test_retry_node_direct_function_uses_config(self) -> None:
         """Test retry node direct function uses config for max_retries."""
-        with patch("src.graph.nodes.retry_node.get_config") as mock_get_config:
+        with patch("src.config.get_config") as mock_get_config:
             mock_config = Mock()
             mock_config.max_retries = 5
             mock_get_config.return_value = mock_config
@@ -1252,3 +1252,378 @@ class TestSupervisorNode:
             # Original states should not be modified
             assert state1.get("current_task") is None
             assert state2.get("current_task") is None
+
+
+class TestExportNode:
+    """Tests for export_node."""
+    
+    def test_export_node_success(self) -> None:
+        """Test export node executes successfully."""
+        from src.graph.nodes.export_node import create_export_node
+        from unittest.mock import patch, MagicMock
+        from pathlib import Path
+        import tempfile
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf", "include_visualizations": False}
+        
+        node = create_export_node(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config["output_dir"] = str(Path(tmpdir) / "exports")
+            
+            with patch("src.config.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.template_engine.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_table_of_contents.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc_instance.build = MagicMock(return_value=None)
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        
+                        result = node(state)
+                        
+                        assert "export_paths" in result
+                        assert result["export_paths"] is not None
+                        assert result["current_task"] == "Export completed successfully"
+    
+    def test_export_node_pure_function(self) -> None:
+        """Test that export node is a pure function."""
+        from src.graph.nodes.export_node import create_export_node
+        from unittest.mock import patch, MagicMock
+        from pathlib import Path
+        import tempfile
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        node = create_export_node(llm=mock_llm, config=config)
+        
+        state1 = create_initial_state("Test 1")
+        state1["report"] = "# Report 1\n## Summary\nContent 1"
+        
+        state2 = create_initial_state("Test 2")
+        state2["report"] = "# Report 2\n## Summary\nContent 2"
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config["output_dir"] = str(Path(tmpdir) / "exports")
+            
+            with patch("src.config.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.template_engine.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_table_of_contents.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc_instance.build = MagicMock(return_value=None)
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        result1 = node(state1)
+                        result2 = node(state2)
+                        
+                        # Results should be independent - both should have export_paths
+                        assert result1.get("export_paths") is not None
+                        assert result2.get("export_paths") is not None
+                        # Original states should not be modified
+                        assert state1.get("export_paths") is None
+                        assert state2.get("export_paths") is None
+                        # Results should be different objects
+                        assert result1 is not result2
+                        # Results should have different reports (from original states)
+                        assert result1.get("report") == state1.get("report")
+                        assert result2.get("report") == state2.get("report")
+    
+    def test_export_node_handles_workflow_error(self) -> None:
+        """Test export node handles WorkflowError gracefully."""
+        from src.graph.nodes.export_node import create_export_node
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        node = create_export_node(llm=mock_llm, config=config)
+        
+        with patch("src.graph.nodes.export_node.ExportAgent") as mock_agent_class:
+            mock_agent = Mock(spec=ExportAgent)
+            mock_agent.execute.side_effect = WorkflowError(
+                "Export failed",
+                context={"error": "test"}
+            )
+            mock_agent_class.return_value = mock_agent
+            
+            state = create_initial_state("Test")
+            state["report"] = "# Report\n## Summary\nTest content"
+            
+            result = node(state)
+            
+            # Should not raise exception, but add error to validation_errors
+            assert len(result["validation_errors"]) > 0
+            assert any("Export generation failed" in err for err in result["validation_errors"])
+            assert result["current_task"] == "Export generation failed"
+    
+    def test_export_node_handles_unexpected_error(self) -> None:
+        """Test export node handles unexpected errors gracefully."""
+        from src.graph.nodes.export_node import create_export_node
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        node = create_export_node(llm=mock_llm, config=config)
+        
+        with patch("src.graph.nodes.export_node.ExportAgent") as mock_agent_class:
+            mock_agent = Mock(spec=ExportAgent)
+            mock_agent.execute.side_effect = ValueError("Unexpected error")
+            mock_agent_class.return_value = mock_agent
+            
+            state = create_initial_state("Test")
+            state["report"] = "# Report\n## Summary\nTest content"
+            
+            result = node(state)
+            
+            # Should not raise exception, but add error to validation_errors
+            assert len(result["validation_errors"]) > 0
+            assert any("Unexpected error" in err for err in result["validation_errors"])
+            assert result["current_task"] == "Export generation failed"
+    
+    def test_export_node_direct_function_with_llm_in_state(self) -> None:
+        """Test export node direct function with llm in state."""
+        from src.graph.nodes.export_node import export_node
+        from unittest.mock import patch, MagicMock
+        from pathlib import Path
+        import tempfile
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config["output_dir"] = str(Path(tmpdir) / "exports")
+            
+            with patch("src.config.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.template_engine.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_table_of_contents.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc_instance.build = MagicMock(return_value=None)
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state: WorkflowState = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        state["llm"] = mock_llm  # type: ignore
+                        state["config"] = config  # type: ignore
+                        
+                        result = export_node(state)
+                        
+                        assert "export_paths" in result
+    
+    def test_export_node_direct_function_missing_llm(self) -> None:
+        """Test export node direct function raises error if llm missing."""
+        from src.graph.nodes.export_node import export_node
+        
+        state = create_initial_state("Test")
+        state["report"] = "# Report\n## Summary\nTest content"
+        # No llm in state
+        
+        with pytest.raises(WorkflowError, match="LLM instance required"):
+            export_node(state)
+    
+    def test_export_node_preserves_state_fields(self) -> None:
+        """Test export node preserves existing state fields."""
+        from src.graph.nodes.export_node import create_export_node
+        from unittest.mock import patch, MagicMock
+        from pathlib import Path
+        import tempfile
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        node = create_export_node(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config["output_dir"] = str(Path(tmpdir) / "exports")
+            
+            with patch("src.config.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.template_engine.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_table_of_contents.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc_instance.build = MagicMock(return_value=None)
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        state["retry_count"] = 1
+                        state["current_task"] = "Previous task"
+                        
+                        result = node(state)
+                        
+                        # Should preserve retry_count and update current_task
+                        assert result["retry_count"] == 1
+                        assert result["current_task"] == "Export completed successfully"
+    
+    def test_export_node_no_side_effects(self) -> None:
+        """Test export node has no side effects."""
+        from src.graph.nodes.export_node import create_export_node
+        from unittest.mock import patch, MagicMock
+        from pathlib import Path
+        import tempfile
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        node = create_export_node(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config["output_dir"] = str(Path(tmpdir) / "exports")
+            
+            with patch("src.config.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.template_engine.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_table_of_contents.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc_instance.build = MagicMock(return_value=None)
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        
+                        original_state_id = id(state)
+                        
+                        result = node(state)
+                        
+                        # State object itself should not be mutated (new dict returned)
+                        assert id(result) != original_state_id
+                        # Original state should remain unchanged
+                        assert state.get("export_paths") is None
+    
+    def test_export_node_handles_missing_report(self) -> None:
+        """Test export node handles missing report gracefully."""
+        from src.graph.nodes.export_node import create_export_node
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        node = create_export_node(llm=mock_llm, config=config)
+        
+        with patch("src.graph.nodes.export_node.ExportAgent") as mock_agent_class:
+            mock_agent = Mock(spec=ExportAgent)
+            mock_agent.execute.side_effect = WorkflowError("Cannot export without a report")
+            mock_agent_class.return_value = mock_agent
+            
+            state = create_initial_state("Test")
+            # No report
+            
+            result = node(state)
+            
+            # Should not raise exception, but add error to validation_errors
+            assert len(result["validation_errors"]) > 0
+            assert result["current_task"] == "Export generation failed"
+    
+    def test_export_node_handles_missing_insights(self) -> None:
+        """Test export node handles missing insights gracefully."""
+        from src.graph.nodes.export_node import create_export_node
+        from unittest.mock import patch, MagicMock
+        from pathlib import Path
+        import tempfile
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf", "include_visualizations": True}
+        node = create_export_node(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config["output_dir"] = str(Path(tmpdir) / "exports")
+            
+            with patch("src.config.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.template_engine.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_table_of_contents.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc_instance.build = MagicMock(return_value=None)
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        # No insights
+        
+                        result = node(state)
+                        
+                        # Should still succeed without visualizations
+                        assert "export_paths" in result
+    
+    def test_export_node_handles_file_system_errors(self) -> None:
+        """Test export node handles file system errors gracefully."""
+        from src.graph.nodes.export_node import create_export_node
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf", "output_dir": "/invalid/path"}
+        node = create_export_node(llm=mock_llm, config=config)
+        
+        with patch("src.graph.nodes.export_node.ExportAgent") as mock_agent_class:
+            mock_agent = Mock(spec=ExportAgent)
+            mock_agent.execute.side_effect = WorkflowError("File system error")
+            mock_agent_class.return_value = mock_agent
+            
+            state = create_initial_state("Test")
+            state["report"] = "# Report\n## Summary\nTest content"
+            
+            result = node(state)
+            
+            # Should handle error gracefully
+            assert len(result["validation_errors"]) > 0
+            assert result["current_task"] == "Export generation failed"

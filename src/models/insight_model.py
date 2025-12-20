@@ -99,7 +99,8 @@ class Insight(BaseModel):
     positioning: str = Field(
         ...,
         description="Description of competitor positioning",
-        min_length=1,
+        min_length=50,
+        max_length=500,
     )
     
     trends: list[str] = Field(

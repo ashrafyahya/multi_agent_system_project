@@ -3,21 +3,6 @@
 This module implements the DataCollectorAgent that uses web search and
 scraper tools to collect competitor data and return structured CompetitorProfile
 objects.
-
-Example:
-    ```python
-    from src.agents.data_collector import DataCollectorAgent
-    from langchain_groq import ChatGroq
-    from src.graph.state import create_initial_state
-    
-    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-    config = {"max_results": 10}
-    agent = DataCollectorAgent(llm=llm, config=config)
-    
-    state = create_initial_state("Analyze competitors")
-    state["plan"] = {"tasks": ["Find competitors"], "minimum_results": 4}
-    updated_state = agent.execute(state)
-    ```
 """
 
 import logging
@@ -54,19 +39,6 @@ class DataCollectorAgent(BaseAgent):
     Attributes:
         llm: Language model instance (injected, may be used for data extraction)
         config: Configuration dictionary (injected)
-    
-    Example:
-        ```python
-        from langchain_groq import ChatGroq
-        
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-        config = {"max_results": 10}
-        agent = DataCollectorAgent(llm=llm, config=config)
-        
-        state = create_initial_state("Analyze competitors")
-        state["plan"] = {"tasks": ["Find competitors"], "minimum_results": 4}
-        updated_state = agent.execute(state)
-        ```
     """
     
     def execute(self, state: WorkflowState) -> WorkflowState:
@@ -87,17 +59,8 @@ class DataCollectorAgent(BaseAgent):
         
         Raises:
             WorkflowError: If plan is missing or data collection fails critically
-        
-        Example:
-            ```python
-            state = create_initial_state("Analyze competitors")
-            state["plan"] = {"tasks": ["Find competitors"], "minimum_results": 4}
-            updated_state = agent.execute(state)
-            assert updated_state["collected_data"] is not None
-            ```
         """
         try:
-            # Extract plan
             plan_data = state.get("plan")
             if not plan_data:
                 raise WorkflowError(
@@ -118,10 +81,8 @@ class DataCollectorAgent(BaseAgent):
                 f"minimum_results={plan.minimum_results}"
             )
             
-            # Collect competitor data
             competitors = self._collect_competitor_data(plan)
             
-            # Update state
             new_state = state.copy()
             new_state["collected_data"] = {
                 "competitors": [comp.model_dump() for comp in competitors]
@@ -159,13 +120,10 @@ class DataCollectorAgent(BaseAgent):
         
         max_results = self.config.get("max_results", plan.minimum_results)
         
-        # Generate search queries from tasks
         search_queries = self._generate_search_queries(plan.tasks)
         
-        # Perform searches and collect data
         for query in search_queries:
             try:
-                # Perform web search
                 search_result = web_search.invoke({
                     "query": query,
                     "max_results": max_results
@@ -175,24 +133,20 @@ class DataCollectorAgent(BaseAgent):
                     logger.warning(f"Search failed for query '{query}': {search_result.get('error')}")
                     continue
                 
-                # Process search results
                 for result in search_result.get("results", []):
                     url = result.get("url", "")
                     if not url or url in seen_urls:
                         continue
                     
-                    # Extract competitor information
                     competitor = self._extract_competitor_info(result, seen_names)
                     if competitor:
                         competitors.append(competitor)
                         seen_urls.add(url)
                         seen_names.add(competitor.name.lower())
                         
-                        # Stop if we have enough competitors
-                        if len(competitors) >= plan.minimum_results * 2:  # Collect extra for quality
+                        if len(competitors) >= plan.minimum_results * 2:
                             break
                 
-                # Stop if we have enough competitors
                 if len(competitors) >= plan.minimum_results * 2:
                     break
                     
@@ -200,10 +154,8 @@ class DataCollectorAgent(BaseAgent):
                 logger.warning(f"Error processing query '{query}': {e}")
                 continue
         
-        # If we don't have enough, try scraping some URLs for more details
         if len(competitors) < plan.minimum_results:
             logger.info(f"Only collected {len(competitors)} competitors, attempting to scrape for more")
-            # Additional scraping logic could go here
         
         if len(competitors) < plan.minimum_results:
             logger.warning(
@@ -281,13 +233,22 @@ class DataCollectorAgent(BaseAgent):
             # Extract products (basic extraction)
             products = self._extract_products(snippet, title)
             
+            # Extract quantitative metrics from snippet
+            metrics = self._extract_quantitative_metrics(snippet, title)
+            
             # Create competitor profile
             competitor = CompetitorProfile(
                 name=name,
                 website=website,
                 products=products,
                 source_url=url,
-                market_presence=snippet[:200] if snippet else None  # Truncate
+                market_presence=snippet[:200] if snippet else None,  # Truncate
+                market_share=metrics.get("market_share"),
+                revenue=metrics.get("revenue"),
+                user_count=metrics.get("user_count"),
+                founded_year=metrics.get("founded_year"),
+                headquarters=metrics.get("headquarters"),
+                key_features=metrics.get("key_features", [])
             )
             
             return competitor
@@ -382,6 +343,161 @@ class DataCollectorAgent(BaseAgent):
                     products.append(product)
         
         return products[:5]  # Limit to 5 products
+    
+    def _extract_quantitative_metrics(
+        self,
+        snippet: str,
+        title: str
+    ) -> dict[str, Any]:
+        """Extract quantitative metrics from snippet and title.
+        
+        Attempts to extract structured quantitative data from text using
+        pattern matching. Extracts market share, revenue, user count,
+        founded year, headquarters, and key features.
+        
+        Args:
+            snippet: Page snippet text
+            title: Page title
+        
+        Returns:
+            Dictionary containing extracted metrics:
+            - market_share: float | None
+            - revenue: float | str | None
+            - user_count: int | str | None
+            - founded_year: int | None
+            - headquarters: str | None
+            - key_features: list[str]
+        """
+        metrics: dict[str, Any] = {
+            "market_share": None,
+            "revenue": None,
+            "user_count": None,
+            "founded_year": None,
+            "headquarters": None,
+            "key_features": []
+        }
+        
+        text = f"{title} {snippet}".lower()
+        full_text = f"{title} {snippet}"
+        
+        # Extract market share (e.g., "35% market share", "20% of the market")
+        market_share_patterns = [
+            r'(\d+\.?\d*)\s*%\s*market\s*share',
+            r'(\d+\.?\d*)\s*%\s*of\s*the\s*market',
+            r'market\s*share\s*of\s*(\d+\.?\d*)\s*%',
+        ]
+        for pattern in market_share_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                try:
+                    share = float(match.group(1))
+                    if 0 <= share <= 100:
+                        metrics["market_share"] = share
+                        break
+                except (ValueError, TypeError):
+                    continue
+        
+        # Extract revenue (e.g., "$2B", "$1.5 billion", "$500M")
+        revenue_patterns = [
+            r'\$(\d+\.?\d*)\s*([BMK]|billion|million|thousand)',
+            r'revenue\s*(?:of|is|:)?\s*\$?(\d+\.?\d*)\s*([BMK]|billion|million)',
+        ]
+        for pattern in revenue_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                try:
+                    value = float(match.group(1))
+                    unit = match.group(2).upper()
+                    if unit in ['B', 'BILLION']:
+                        metrics["revenue"] = value * 1e9
+                    elif unit in ['M', 'MILLION']:
+                        metrics["revenue"] = value * 1e6
+                    elif unit in ['K', 'THOUSAND']:
+                        metrics["revenue"] = value * 1e3
+                    else:
+                        metrics["revenue"] = value
+                    break
+                except (ValueError, TypeError, IndexError):
+                    continue
+        
+        # Extract user count (e.g., "1M users", "500K customers")
+        user_count_patterns = [
+            r'(\d+\.?\d*)\s*([BMK]|million|thousand)\s*(?:users?|customers?|subscribers?)',
+            r'(?:users?|customers?|subscribers?):?\s*(\d+\.?\d*)\s*([BMK]|million|thousand)',
+        ]
+        for pattern in user_count_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                try:
+                    value = float(match.group(1))
+                    unit = match.group(2).upper()
+                    if unit in ['M', 'MILLION']:
+                        metrics["user_count"] = int(value * 1e6)
+                    elif unit in ['K', 'THOUSAND']:
+                        metrics["user_count"] = int(value * 1e3)
+                    elif unit in ['B', 'BILLION']:
+                        metrics["user_count"] = int(value * 1e9)
+                    else:
+                        metrics["user_count"] = int(value)
+                    break
+                except (ValueError, TypeError, IndexError):
+                    continue
+        
+        # Extract founded year (e.g., "founded in 2010", "established 2005")
+        founded_patterns = [
+            r'founded\s+(?:in\s+)?(\d{4})',
+            r'established\s+(?:in\s+)?(\d{4})',
+            r'(\d{4})\s*\(founded\)',
+        ]
+        for pattern in founded_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                try:
+                    year = int(match.group(1))
+                    if 1800 <= year <= 2100:
+                        metrics["founded_year"] = year
+                        break
+                except (ValueError, TypeError):
+                    continue
+        
+        # Extract headquarters (e.g., "headquartered in San Francisco", "based in New York")
+        hq_patterns = [
+            r'headquartered\s+in\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+            r'based\s+in\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+            r'hq:\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        ]
+        for pattern in hq_patterns:
+            match = re.search(pattern, full_text, re.IGNORECASE)
+            if match:
+                hq = match.group(1).strip()
+                if len(hq) > 2 and len(hq) < 100:
+                    metrics["headquarters"] = hq
+                    break
+        
+        # Extract key features (look for feature lists)
+        feature_patterns = [
+            r'features?:\s*([^\.]+)',
+            r'key\s+features?:\s*([^\.]+)',
+            r'offers?\s+([^\.]+)',
+        ]
+        for pattern in feature_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                # Split by common separators
+                features = re.split(r'[,;]|\sand\s', match)
+                for feature in features:
+                    feature = feature.strip()
+                    if feature and len(feature) > 3 and len(feature) < 100:
+                        metrics["key_features"].append(feature)
+                if metrics["key_features"]:
+                    break
+            if metrics["key_features"]:
+                break
+        
+        # Limit features
+        metrics["key_features"] = metrics["key_features"][:10]
+        
+        return metrics
     
     @property
     def name(self) -> str:

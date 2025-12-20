@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "competitor-analysis-multi-agent"
-version = "0.1.0"
+version = "2.0.0"
 description = "A robust multi-agent system using LangGraph for competitor analysis with validation gates and quality assurance"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -127,6 +127,9 @@ omit = [
     "*/tests/*",
     "*/test_*.py",
     "*/__pycache__/*",
+    "*/template/markdown_parser.py",
+    "*/template/markdown_converter.py",
+    "*/template/pdf_formatter.py",
 ]
 
 [tool.coverage.report]

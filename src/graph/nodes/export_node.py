@@ -2,21 +2,6 @@
 
 Pure function node that generates PDF and image exports from reports using
 ExportAgent and updates the workflow state.
-
-Example:
-    ```python
-    from src.graph.nodes.export_node import create_export_node
-    from langchain_groq import ChatGroq
-    from src.graph.state import create_initial_state
-    
-    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.7)
-    config = {"export_format": "pdf", "include_visualizations": True}
-    node = create_export_node(llm=llm, config=config)
-    
-    state = create_initial_state("Analyze competitors")
-    state["report"] = "# Report\n## Summary\n..."
-    updated_state = node(state)
-    ```
 """
 
 import logging
@@ -27,13 +12,15 @@ from langchain_core.language_models import BaseChatModel
 from src.agents.export_agent import ExportAgent
 from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState
+from src.utils.agent_logger import AgentLogger
 
 logger = logging.getLogger(__name__)
 
 
 def create_export_node(
     llm: BaseChatModel,
-    config: dict[str, Any]
+    config: dict[str, Any],
+    agent_logger: AgentLogger | None = None
 ) -> Any:
     """Create an export node function.
     
@@ -48,19 +35,6 @@ def create_export_node(
     
     Returns:
         Pure function that takes WorkflowState and returns updated WorkflowState
-    
-    Example:
-        ```python
-        from langchain_groq import ChatGroq
-        
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.7)
-        config = {"export_format": "pdf", "include_visualizations": True}
-        node = create_export_node(llm=llm, config=config)
-        
-        state = create_initial_state("Analyze competitors")
-        state["report"] = "# Report\n## Summary\n..."
-        updated_state = node(state)
-        ```
     """
     def export_node(state: WorkflowState) -> WorkflowState:
         """Node that generates export files from report.
@@ -75,14 +49,6 @@ def create_export_node(
         Returns:
             Updated state with export_paths field populated, or original
             state with validation_errors if export generation fails
-        
-        Example:
-            ```python
-            state = create_initial_state("Analyze competitors")
-            state["report"] = "# Report\n## Summary\n..."
-            updated_state = export_node(state)
-            assert "export_paths" in updated_state
-            ```
         """
         try:
             # Create agent instance
@@ -90,6 +56,15 @@ def create_export_node(
             
             # Execute agent
             updated_state = agent.execute(state)
+            
+            # Log agent output
+            if agent_logger and agent_logger.enabled:
+                try:
+                    export_paths = updated_state.get("export_paths")
+                    agent_logger.log_agent_output(agent.name, export_paths, updated_state)
+                except Exception as e:
+                    # Don't disrupt workflow if logging fails
+                    logger.warning(f"Failed to log export agent output: {e}")
             
             export_count = len(updated_state.get("export_paths", {}))
             logger.info(

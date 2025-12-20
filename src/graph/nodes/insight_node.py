@@ -2,21 +2,6 @@
 
 Pure function node that transforms collected data into business insights
 using InsightAgent and updates the workflow state.
-
-Example:
-    ```python
-    from src.graph.nodes.insight_node import create_insight_node
-    from langchain_groq import ChatGroq
-    from src.graph.state import create_initial_state
-    
-    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.7)
-    config = {"temperature": 0.7}
-    node = create_insight_node(llm=llm, config=config)
-    
-    state = create_initial_state("Analyze competitors")
-    state["collected_data"] = {"competitors": [...]}
-    updated_state = node(state)
-    ```
 """
 
 import logging
@@ -27,13 +12,15 @@ from langchain_core.language_models import BaseChatModel
 from src.agents.insight_agent import InsightAgent
 from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState
+from src.utils.agent_logger import AgentLogger
 
 logger = logging.getLogger(__name__)
 
 
 def create_insight_node(
     llm: BaseChatModel,
-    config: dict[str, Any]
+    config: dict[str, Any],
+    agent_logger: AgentLogger | None = None
 ) -> Any:
     """Create an insight node function.
     
@@ -48,18 +35,6 @@ def create_insight_node(
     
     Returns:
         Pure function that takes WorkflowState and returns updated WorkflowState
-    
-    Example:
-        ```python
-        from langchain_groq import ChatGroq
-        
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.7)
-        config = {"temperature": 0.7}
-        node = create_insight_node(llm=llm, config=config)
-        
-        state = create_initial_state("Analyze competitors")
-        updated_state = node(state)
-        ```
     """
     def insight_node(state: WorkflowState) -> WorkflowState:
         """Node that generates business insights from collected data.
@@ -74,14 +49,6 @@ def create_insight_node(
         Returns:
             Updated state with insights field populated, or original
             state with validation_errors if insight generation fails
-        
-        Example:
-            ```python
-            state = create_initial_state("Analyze competitors")
-            state["collected_data"] = {"competitors": [...]}
-            updated_state = insight_node(state)
-            assert "insights" in updated_state
-            ```
         """
         try:
             # Create agent instance
@@ -89,6 +56,15 @@ def create_insight_node(
             
             # Execute agent
             updated_state = agent.execute(state)
+            
+            # Log agent output
+            if agent_logger and agent_logger.enabled:
+                try:
+                    insights = updated_state.get("insights")
+                    agent_logger.log_agent_output(agent.name, insights, updated_state)
+                except Exception as e:
+                    # Don't disrupt workflow if logging fails
+                    logger.warning(f"Failed to log insight agent output: {e}")
             
             logger.info(
                 f"Insight node completed: "

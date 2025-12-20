@@ -30,24 +30,38 @@ class TestFullWorkflow:
     def test_full_workflow_successful_execution(self, mock_llm: Mock, workflow_config: dict) -> None:
         """Test complete workflow execution from start to finish."""
         # Mock LLM responses for each agent
+        call_count = {"count": 0}
         def mock_llm_invoke(messages):
             """Mock LLM invoke to return appropriate responses based on context."""
-            content = str(messages[-1].content if hasattr(messages[-1], 'content') else messages[-1])
+            call_count["count"] += 1
+            count = call_count["count"]
             
-            # Planner agent - return plan
-            if "plan" in content.lower() or "task" in content.lower():
+            # Check system message to identify agent
+            system_content = ""
+            for msg in messages:
+                if hasattr(msg, "type") and msg.type == "system":
+                    system_content = str(msg.content) if hasattr(msg, "content") else str(msg)
+                    break
+            
+            # Planner agent - check for planner system prompt keywords
+            if "execution plan" in system_content.lower() or "competitor analysis" in system_content.lower() or count == 1:
                 return AIMessage(content=sample_llm_response_plan())
             
-            # Insight agent - return insights
-            if "insight" in content.lower() or "swot" in content.lower():
+            # Insight agent - check for insight system prompt keywords
+            if "insight" in system_content.lower() or "swot" in system_content.lower():
                 return AIMessage(content=sample_llm_response_insights())
             
-            # Report agent - return report
-            if "report" in content.lower() or "summary" in content.lower():
+            # Report agent - check for report system prompt keywords
+            if "report" in system_content.lower() or "summary" in system_content.lower():
                 return AIMessage(content=sample_llm_response_report())
             
-            # Default response
-            return AIMessage(content='{"result": "success"}')
+            # Default: return plan for first call, insights for second, report for third
+            if count == 1:
+                return AIMessage(content=sample_llm_response_plan())
+            elif count == 2:
+                return AIMessage(content=sample_llm_response_insights())
+            else:
+                return AIMessage(content=sample_llm_response_report())
         
         mock_llm.invoke = Mock(side_effect=mock_llm_invoke)
         
@@ -273,19 +287,36 @@ class TestFullWorkflow:
         call_count = {"plan": 0, "insight": 0, "report": 0}
         
         def mock_llm_invoke(messages):
-            content = str(messages[-1].content if hasattr(messages[-1], 'content') else messages[-1])
+            # Check system message to identify agent
+            system_content = ""
+            for msg in messages:
+                if hasattr(msg, "type") and msg.type == "system":
+                    system_content = str(msg.content) if hasattr(msg, "content") else str(msg)
+                    break
             
-            if "plan" in content.lower():
+            # Planner agent
+            if "execution plan" in system_content.lower() or "competitor analysis" in system_content.lower():
                 call_count["plan"] += 1
                 return AIMessage(content=sample_llm_response_plan())
-            elif "insight" in content.lower() or "swot" in content.lower():
+            # Insight agent
+            elif "insight" in system_content.lower() or "swot" in system_content.lower():
                 call_count["insight"] += 1
                 return AIMessage(content=sample_llm_response_insights())
-            elif "report" in content.lower():
+            # Report agent
+            elif "report" in system_content.lower() or "summary" in system_content.lower():
                 call_count["report"] += 1
                 return AIMessage(content=sample_llm_response_report())
             
-            return AIMessage(content='{"result": "success"}')
+            # Fallback: use call order
+            if call_count["plan"] == 0:
+                call_count["plan"] += 1
+                return AIMessage(content=sample_llm_response_plan())
+            elif call_count["insight"] == 0:
+                call_count["insight"] += 1
+                return AIMessage(content=sample_llm_response_insights())
+            else:
+                call_count["report"] += 1
+                return AIMessage(content=sample_llm_response_report())
         
         mock_llm.invoke = Mock(side_effect=mock_llm_invoke)
         

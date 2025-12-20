@@ -3,21 +3,6 @@
 This module implements the InsightAgent that transforms collected competitor
 data into business insights, generates SWOT analysis, and extracts trends
 and opportunities.
-
-Example:
-    ```python
-    from src.agents.insight_agent import InsightAgent
-    from langchain_groq import ChatGroq
-    from src.graph.state import create_initial_state
-    
-    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.7)
-    config = {"temperature": 0.7}
-    agent = InsightAgent(llm=llm, config=config)
-    
-    state = create_initial_state("Analyze competitors")
-    state["collected_data"] = {"competitors": [...]}
-    updated_state = agent.execute(state)
-    ```
 """
 
 import json
@@ -54,56 +39,89 @@ class InsightAgent(BaseAgent):
         llm: Language model instance (injected)
         config: Configuration dictionary (injected)
     
-    Example:
-        ```python
-        from langchain_groq import ChatGroq
-        
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.7)
-        config = {"temperature": 0.7}
-        agent = InsightAgent(llm=llm, config=config)
-        
-        state = create_initial_state("Analyze competitors")
-        state["collected_data"] = {"competitors": [...]}
-        updated_state = agent.execute(state)
-        ```
     """
     
-    SYSTEM_PROMPT = """You are a business intelligence analyst specializing in competitor analysis.
+    SYSTEM_PROMPT = """You are a senior business intelligence analyst and competitive strategist with expertise in market analysis, strategic planning, and competitive intelligence.
 
-Your task is to analyze competitor data and extract meaningful business insights.
+Your task is to transform raw competitor data into actionable, strategic business insights that drive decision-making.
 
-Given competitor information, you must:
-1. Generate a comprehensive SWOT analysis:
-   - Strengths: What advantages do these competitors have?
-   - Weaknesses: What are their limitations or vulnerabilities?
-   - Opportunities: What market opportunities exist?
-   - Threats: What threats do they face?
+**Analysis Framework:**
 
-2. Determine market positioning: How do these competitors position themselves in the market?
+1. **SWOT Analysis** (Comprehensive, data-driven):
+   - **Strengths**: Identify competitive advantages, market leadership, unique capabilities
+     * Include quantitative evidence: market share %, revenue figures, user base, growth rates
+     * Focus on sustainable competitive advantages, not temporary wins
+     * Example: "Market leader with 35% market share and $2B annual revenue"
+   
+   - **Weaknesses**: Identify vulnerabilities, gaps, and limitations
+     * Include specific pain points, feature gaps, pricing issues, market position weaknesses
+     * Consider customer complaints, negative reviews, churn indicators
+     * Example: "Limited international presence (only 15% revenue from outside US)"
+   
+   - **Opportunities**: Market opportunities and growth potential
+     * Emerging markets, underserved segments, technology trends, partnership opportunities
+     * Include market size estimates, growth projections when available
+     * Example: "Untapped SMB market segment worth $500M growing at 25% YoY"
+   
+   - **Threats**: Competitive threats and market risks
+     * New entrants, disruptive technologies, market shifts, regulatory changes
+     * Include impact assessment when possible
+     * Example: "Emerging AI-powered competitors gaining 10% market share annually"
 
-3. Identify market trends: What trends are evident from the competitor data?
+2. **Market Positioning** (Strategic positioning analysis):
+   - Analyze how each competitor positions itself (premium, value, niche, mass market)
+   - Identify positioning strategies: differentiation, cost leadership, focus
+   - Include target customer segments and value propositions
+   - Describe competitive positioning relative to market (leader, challenger, follower, nicher)
+   - **CRITICAL**: Must be between 50 and 500 characters (strict limit)
+   - Be concise and strategic - summarize key positioning insights in 2-4 sentences
+   - Focus on the most important positioning aspects, not exhaustive details
 
-4. Extract business opportunities: What opportunities can be identified for our business?
+3. **Market Trends** (Data-driven trend identification):
+   - Identify macro trends: technology shifts, consumer behavior changes, regulatory impacts
+   - Identify industry-specific trends: pricing models, feature evolution, go-to-market strategies
+   - Include quantitative indicators when available (growth rates, adoption metrics)
+   - Focus on actionable trends that inform strategy
+   - Example: "Shift to usage-based pricing (40% of competitors adopting in last 2 years)"
 
-Return your analysis as a JSON object with this exact structure:
+4. **Business Opportunities** (Actionable opportunities):
+   - Market gaps and white spaces competitors are not addressing
+   - Underserved customer segments or use cases
+   - Technology or feature opportunities
+   - Partnership or acquisition opportunities
+   - Pricing or business model innovations
+   - Prioritize by market size, growth potential, and strategic fit
+
+**Output Requirements:**
+
+Return your analysis as a valid JSON object with this exact structure:
 {{
     "swot": {{
-        "strengths": ["strength1", "strength2", ...],
-        "weaknesses": ["weakness1", "weakness2", ...],
-        "opportunities": ["opportunity1", "opportunity2", ...],
-        "threats": ["threat1", "threat2", ...]
+        "strengths": ["strength1 with quantitative data", "strength2", ...],
+        "weaknesses": ["weakness1 with specific details", "weakness2", ...],
+        "opportunities": ["opportunity1 with market size", "opportunity2", ...],
+        "threats": ["threat1 with impact", "threat2", ...]
     }},
-    "positioning": "Description of market positioning (at least 20 characters)",
-    "trends": ["trend1", "trend2", ...],
-    "opportunities": ["opportunity1", "opportunity2", ...]
+    "positioning": "Detailed market positioning analysis (minimum 50 characters)",
+    "trends": ["trend1 with data", "trend2", ...],
+    "opportunities": ["opportunity1 prioritized", "opportunity2", ...]
 }}
 
-Ensure:
-- Each SWOT category has at least 1 item
-- Positioning is descriptive (at least 20 characters)
-- Trends are specific and actionable
-- Opportunities are business-focused
-- All fields are present and valid JSON"""
+**Quality Standards:**
+- Each SWOT category: minimum 2 items, maximum 10 items
+- Include quantitative data (percentages, dollar amounts, metrics) in at least 30% of SWOT items
+- **Positioning: STRICT LIMIT - minimum 50 characters, maximum 500 characters (will be truncated if exceeded)**
+- Trends: minimum 2 trends, maximum 8 trends
+- Opportunities: minimum 2 opportunities, maximum 8 opportunities
+- All insights must be specific, actionable, and data-driven
+- Avoid generic statements; use concrete examples and numbers
+- Prioritize insights by strategic importance and data quality
+
+**Best Practices:**
+- Cross-reference multiple data points to validate insights
+- Distinguish between facts (from data) and inferences (your analysis)
+- Focus on insights that inform strategic decisions
+- Consider both short-term tactical and long-term strategic implications"""
 
     def execute(self, state: WorkflowState) -> WorkflowState:
         """Execute insight generation from collected data.
@@ -123,14 +141,6 @@ Ensure:
         
         Raises:
             WorkflowError: If collected_data is missing or insight generation fails
-        
-        Example:
-            ```python
-            state = create_initial_state("Analyze competitors")
-            state["collected_data"] = {"competitors": [...]}
-            updated_state = agent.execute(state)
-            assert updated_state["insights"] is not None
-            ```
         """
         try:
             # Extract collected data
@@ -154,6 +164,9 @@ Ensure:
                 
                 # Generate insights using LLM
                 insight_data = self._generate_insights(competitors_data)
+            
+            # Clean and normalize insight data before validation
+            insight_data = self._clean_insight_data(insight_data)
             
             # Validate and structure as Insight model
             try:
@@ -204,20 +217,16 @@ Ensure:
             WorkflowError: If LLM invocation fails or response cannot be parsed
         """
         try:
-            # Prepare competitor data summary for LLM
             competitor_summary = self._prepare_competitor_summary(competitors_data)
             
-            # Create prompt
             prompt = ChatPromptTemplate.from_messages([
                 ("system", self.SYSTEM_PROMPT),
                 ("human", competitor_summary)
             ])
             
-            # Invoke LLM
             messages = prompt.format_messages()
             response = self.llm.invoke(messages)
             
-            # Extract content
             content = response.content if hasattr(response, "content") else str(response)
             
             if not content:
@@ -225,7 +234,6 @@ Ensure:
             
             logger.debug(f"LLM response: {content[:200]}...")
             
-            # Parse insights from response
             insight_data = self._parse_insight_response(content)
             
             return insight_data
@@ -339,18 +347,13 @@ Ensure:
                 json_str = content
         
         try:
-            # Clean JSON string: remove control characters that can break JSON parsing
-            # Replace common problematic control characters with spaces
             json_str_clean = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', json_str)
-            # Remove trailing commas before closing braces/brackets
             json_str_clean = re.sub(r',\s*([}\]])', r'\1', json_str_clean)
             insight_data = json.loads(json_str_clean)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON from response: {e}")
             logger.debug(f"Response content: {content[:500]}")
-            # Try to fix common JSON issues and retry
             try:
-                # Try escaping newlines and other control characters in strings
                 json_str_fixed = json_str.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
                 insight_data = json.loads(json_str_fixed)
                 logger.info("Successfully parsed JSON after fixing control characters")
@@ -360,7 +363,6 @@ Ensure:
                     context={"error": str(e), "content_preview": content[:500]}
                 ) from e
         
-        # Validate required fields
         required_fields = ["swot", "positioning"]
         missing_fields = [field for field in required_fields if field not in insight_data]
         
@@ -370,7 +372,6 @@ Ensure:
                 context={"insight_data": insight_data}
             )
         
-        # Validate SWOT structure
         swot = insight_data.get("swot", {})
         if not isinstance(swot, dict):
             raise WorkflowError(
@@ -385,17 +386,71 @@ Ensure:
             elif not isinstance(swot[category], list):
                 swot[category] = []
         
-        # Set defaults for optional fields
         insight_data.setdefault("trends", [])
         insight_data.setdefault("opportunities", [])
         
-        # Ensure lists are lists
         if not isinstance(insight_data.get("trends"), list):
             insight_data["trends"] = []
         if not isinstance(insight_data.get("opportunities"), list):
             insight_data["opportunities"] = []
         
         return insight_data
+    
+    def _clean_insight_data(self, insight_data: dict[str, Any]) -> dict[str, Any]:
+        """Clean and normalize insight data before validation.
+        
+        Performs data cleaning operations:
+        - Truncates positioning if it exceeds max_length (500 chars)
+        - Ensures all fields meet validation requirements
+        - Normalizes string fields
+        
+        Args:
+            insight_data: Raw insight data dictionary from LLM
+        
+        Returns:
+            Cleaned insight data dictionary ready for validation
+        """
+        cleaned_data = insight_data.copy()
+        
+        # Clean positioning field - truncate if exceeds 500 characters
+        positioning = cleaned_data.get("positioning", "")
+        if positioning:
+            positioning = str(positioning).strip()
+            max_length = 500  # Match Insight model max_length
+            if len(positioning) > max_length:
+                logger.warning(
+                    f"Positioning field exceeds {max_length} characters ({len(positioning)}). "
+                    f"Truncating to {max_length} characters."
+                )
+                # Truncate at word boundary if possible
+                truncated = positioning[:max_length]
+                # Try to cut at a sentence boundary
+                last_period = truncated.rfind('.')
+                last_space = truncated.rfind(' ')
+                if last_period > max_length * 0.8:  # If period is in last 20%, use it
+                    truncated = truncated[:last_period + 1]
+                elif last_space > max_length * 0.9:  # If space is in last 10%, use it
+                    truncated = truncated[:last_space]
+                else:
+                    truncated = truncated[:max_length]
+                cleaned_data["positioning"] = truncated
+            else:
+                cleaned_data["positioning"] = positioning
+        
+        # Ensure positioning meets minimum length
+        if cleaned_data.get("positioning") and len(cleaned_data["positioning"]) < 50:
+            logger.warning(
+                f"Positioning field is too short ({len(cleaned_data['positioning'])} chars). "
+                "Minimum is 50 characters."
+            )
+            # Pad with generic text if too short (shouldn't happen with updated prompt)
+            if len(cleaned_data["positioning"]) < 50:
+                cleaned_data["positioning"] = (
+                    cleaned_data["positioning"] + 
+                    " Market positioning analysis based on competitor data."
+                )[:500]  # Ensure it doesn't exceed max
+        
+        return cleaned_data
     
     @property
     def name(self) -> str:

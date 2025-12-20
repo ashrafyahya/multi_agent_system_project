@@ -313,15 +313,28 @@ def normalize_url(url: str) -> str | None:
     
     url = url.strip()
     
+    # Check if URL already has a scheme (case-insensitive)
+    url_lower = url.lower()
+    has_scheme = url_lower.startswith(('http://', 'https://'))
+    
     # Add scheme if missing
-    if not url.startswith(('http://', 'https://')):
+    if not has_scheme:
         url = 'http://' + url
     
     try:
         parsed = urlparse(url)
         
+        # Validate URL - must have scheme and netloc
         if not parsed.scheme or not parsed.netloc:
             return None
+        
+        # Additional validation: if we added a scheme, check if netloc is valid
+        # If netloc doesn't look like a valid hostname, return None
+        if not has_scheme:
+            # Check if netloc looks like a valid hostname (contains at least one dot or is localhost)
+            if '.' not in parsed.netloc and parsed.netloc.lower() not in ('localhost', 'localhost.localdomain'):
+                # If it's not a valid hostname, return None
+                return None
         
         # Normalize scheme and hostname
         scheme = parsed.scheme.lower()

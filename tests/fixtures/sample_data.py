@@ -34,6 +34,12 @@ def sample_collected_data() -> dict:
                 "description": "Leading SaaS provider",
                 "products": ["Product 1", "Product 2"],
                 "pricing": "Starting at $99/month",
+                "market_share": 35.0,
+                "revenue": 2000000000,
+                "user_count": 1000000,
+                "founded_year": 2010,
+                "headquarters": "San Francisco",
+                "key_features": ["Feature 1", "Feature 2", "Feature 3"],
             },
             {
                 "name": "Competitor B",
@@ -42,6 +48,12 @@ def sample_collected_data() -> dict:
                 "description": "Enterprise SaaS solution",
                 "products": ["Enterprise Suite"],
                 "pricing": "Custom pricing",
+                "market_share": 20.0,
+                "revenue": 1500000000,
+                "user_count": 500000,
+                "founded_year": 2012,
+                "headquarters": "New York",
+                "key_features": ["Enterprise Feature 1", "Enterprise Feature 2"],
             },
             {
                 "name": "Competitor C",
@@ -50,6 +62,12 @@ def sample_collected_data() -> dict:
                 "description": "Mid-market SaaS platform",
                 "products": ["Platform"],
                 "pricing": "Starting at $49/month",
+                "market_share": 15.0,
+                "revenue": 500000000,
+                "user_count": 250000,
+                "founded_year": 2015,
+                "headquarters": "Austin",
+                "key_features": ["Platform Feature 1"],
             },
             {
                 "name": "Competitor D",
@@ -58,6 +76,12 @@ def sample_collected_data() -> dict:
                 "description": "Startup-focused SaaS",
                 "products": ["Starter", "Pro"],
                 "pricing": "Free tier available",
+                "market_share": 10.0,
+                "revenue": 200000000,
+                "user_count": 100000,
+                "founded_year": 2018,
+                "headquarters": "Seattle",
+                "key_features": ["Starter Feature", "Pro Feature"],
             },
         ]
     }
@@ -87,7 +111,7 @@ def sample_insights() -> dict:
                 "Technology disruption",
             ],
         },
-        "positioning": "Premium enterprise-focused SaaS provider with comprehensive features",
+        "positioning": "Premium enterprise-focused SaaS provider with comprehensive features, strong market presence, and established customer relationships in the competitive software-as-a-service industry",
         "trends": [
             "AI and automation integration",
             "Mobile-first approach",
@@ -180,5 +204,55 @@ def sample_llm_response_report() -> str:
     "executive_summary": "This competitor analysis provides a comprehensive overview...",
     "swot_breakdown": "**Strengths:** Strong market presence...",
     "competitor_overview": "The market consists of four main competitors...",
-    "recommendations": "1. Pricing Strategy: Consider introducing..."
+    "recommendations": "1. Pricing Strategy: Consider introducing...",
+    "methodology": "Data was collected through web search and scraping from multiple sources...",
+    "sources": ["https://competitor-a.com", "https://competitor-b.com", "https://competitor-c.com", "https://competitor-d.com"]
 }"""
+
+
+def sample_collected_data_with_inconsistencies() -> dict:
+    """Create sample collected data with data consistency issues for testing."""
+    return {
+        "competitors": [
+            {
+                "name": "Competitor A",
+                "source_url": "https://competitor-a.com",
+                "market_share": 50.0,  # High market share
+                "revenue": 1000000000,  # But lower revenue
+            },
+            {
+                "name": "Competitor B",
+                "source_url": "https://competitor-b.com",
+                "market_share": 30.0,
+                "revenue": 2000000000,  # Higher revenue but lower market share
+            },
+            {
+                "name": "Competitor C",
+                "source_url": "https://competitor-c.com",
+                "market_share": 120.0,  # Unrealistic (>100%)
+            },
+            {
+                "name": "Competitor D",
+                "source_url": "https://competitor-d.com",
+                "market_share": -5.0,  # Negative value
+            },
+        ]
+    }
+
+
+def sample_collected_data_low_market_share_sum() -> dict:
+    """Create sample data with low market share sum for testing."""
+    return {
+        "competitors": [
+            {
+                "name": "Competitor A",
+                "source_url": "https://competitor-a.com",
+                "market_share": 15.0,
+            },
+            {
+                "name": "Competitor B",
+                "source_url": "https://competitor-b.com",
+                "market_share": 10.0,
+            },
+        ]
+    }

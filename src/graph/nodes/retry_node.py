@@ -2,20 +2,6 @@
 
 Pure function node that handles retry logic, modifies search queries,
 and increments retry count.
-
-Example:
-    ```python
-    from src.graph.nodes.retry_node import create_retry_node
-    from src.graph.state import create_initial_state
-    
-    node = create_retry_node(max_retries=3)
-    
-    state = create_initial_state("Analyze competitors")
-    state["plan"] = {"tasks": ["Find competitors"]}
-    state["retry_count"] = 1
-    state["validation_errors"] = ["Validation failed"]
-    updated_state = node(state)
-    ```
 """
 
 import logging
@@ -39,15 +25,6 @@ def create_retry_node(max_retries: int = 3) -> Any:
     
     Returns:
         Pure function that takes WorkflowState and returns updated WorkflowState
-    
-    Example:
-        ```python
-        node = create_retry_node(max_retries=3)
-        
-        state = create_initial_state("Analyze competitors")
-        state["plan"] = {"tasks": ["Find competitors"]}
-        updated_state = node(state)
-        ```
     """
     def retry_node(state: WorkflowState) -> WorkflowState:
         """Node that handles retry logic.
@@ -71,15 +48,6 @@ def create_retry_node(max_retries: int = 3) -> Any:
         
         Raises:
             WorkflowError: If max retries exceeded or plan is missing
-        
-        Example:
-            ```python
-            state = create_initial_state("Analyze competitors")
-            state["plan"] = {"tasks": ["Find competitors"]}
-            state["retry_count"] = 1
-            updated_state = retry_node(state)
-            assert updated_state["retry_count"] == 2
-            ```
         """
         # Check if plan exists
         plan = state.get("plan")

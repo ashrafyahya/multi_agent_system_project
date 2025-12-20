@@ -4,10 +4,11 @@ This module contains unit tests for the workflow builder to verify
 graph construction, node connections, and conditional edge logic.
 """
 
-import pytest
 from unittest.mock import Mock, patch
 
+import pytest
 from langchain_core.language_models import BaseChatModel
+from langgraph.graph import END
 
 from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState, create_initial_state
@@ -62,18 +63,16 @@ class TestWorkflowBuilder:
     
     def test_workflow_validation_functions(self) -> None:
         """Test validation functions work correctly."""
-        from src.graph.workflow import (
-            _supervisor_decision,
-            _validate_collector_output,
-            _validate_insight_output,
-            _validate_report_output,
-        )
-        
+        from src.graph.workflow import (_supervisor_decision,
+                                        _validate_collector_output,
+                                        _validate_insight_output,
+                                        _validate_report_output)
+
         # Test supervisor decision
         state = create_initial_state("Test")
         state["plan"] = {"tasks": ["Find competitors"]}
         decision = _supervisor_decision(state, max_retries=3)
-        assert decision in ["collector", "insight", "report", "retry", "END"]
+        assert decision in ["collector", "insight", "report", "export", "retry", END]
         
         # Test collector validation
         state["collected_data"] = {
@@ -85,7 +84,7 @@ class TestWorkflowBuilder:
             ]
         }
         decision = _validate_collector_output(state, max_retries=3)
-        assert decision in ["insight", "retry", "END"]
+        assert decision in ["insight", "retry", END]
         
         # Test insight validation
         state["insights"] = {
@@ -99,12 +98,12 @@ class TestWorkflowBuilder:
             "trends": ["Digital transformation"],
         }
         decision = _validate_insight_output(state, max_retries=3)
-        assert decision in ["report", "retry", "END"]
+        assert decision in ["report", "retry", END]
         
         # Test report validation
         state["report"] = "## Executive Summary\n\n" + "A" * 500
         decision = _validate_report_output(state, max_retries=3)
-        assert decision in ["END", "retry"]
+        assert decision in ["export", "retry", END]
     
     def test_workflow_handles_max_retries(self) -> None:
         """Test workflow respects max retries."""
@@ -115,13 +114,14 @@ class TestWorkflowBuilder:
         state["retry_count"] = 3  # At max retries
         
         decision = _validate_collector_output(state, max_retries=3)
-        assert decision == "END"  # Should end, not retry
+        assert decision == END  # Should end, not retry
     
     def test_workflow_handles_retry_logic(self) -> None:
         """Test workflow retry logic."""
         from src.graph.workflow import _validate_collector_output
         
         state = create_initial_state("Test")
+        state["plan"] = {"tasks": ["Collect data"]}  # Plan required for retry
         state["collected_data"] = {}  # Invalid data
         state["retry_count"] = 1  # Below max retries
         
@@ -172,7 +172,7 @@ class TestWorkflowBuilder:
         state["report"] = "Final report"
         
         decision = _supervisor_decision(state, max_retries=3)
-        assert decision == "END"
+        assert decision == "export"  # Should go to export when report exists
     
     def test_workflow_supervisor_decision_max_retries_exceeded(self) -> None:
         """Test supervisor decision ends workflow when max retries exceeded."""
@@ -184,4 +184,4 @@ class TestWorkflowBuilder:
         state["validation_errors"] = ["Error 1", "Error 2"]
         
         decision = _supervisor_decision(state, max_retries=3)
-        assert decision == "END"
+        assert decision == END

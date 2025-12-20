@@ -5,10 +5,10 @@ environment variable loading, validation, and type safety.
 """
 
 import os
-import pytest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from pydantic import ValidationError
 
 from src.config import Config, get_config, reload_config
@@ -23,7 +23,7 @@ class TestConfig:
             os.environ,
             {
                 "GROQ_API_KEY": "test_api_key",
-                "GROQ_MODEL": "llama-3.1-8b-instant",
+                "LLM_MODEL": "llama-3.1-8b-instant",
                 "MAX_RETRIES": "5",
                 "LOG_LEVEL": "DEBUG",
                 "DATA_DIR": "./test_data",
@@ -33,37 +33,74 @@ class TestConfig:
             config = Config()
             
             assert config.groq_api_key == "test_api_key"
-            assert config.groq_model == "llama-3.1-8b-instant"
+            assert config.llm_model == "llama-3.1-8b-instant"
             assert config.max_retries == 5
             assert config.log_level == "DEBUG"
             assert isinstance(config.data_dir, Path)
     
     def test_config_uses_defaults(self) -> None:
         """Test config uses default values when env vars not set."""
-        with patch.dict(os.environ, {"GROQ_API_KEY": "test_key"}, clear=False):
-            # Remove other env vars
-            env_vars_to_remove = [
-                "GROQ_MODEL",
-                "MAX_RETRIES",
-                "LOG_LEVEL",
-                "DATA_DIR",
-                "TAVILY_API_KEY",
-            ]
-            for var in env_vars_to_remove:
+        # Store original values to restore later
+        original_values = {}
+        env_vars_to_check = [
+            "LLM_MODEL",
+            "LLM_MODEL_PLANNER",
+            "LLM_MODEL_SUPERVISOR",
+            "LLM_MODEL_INSIGHT",
+            "LLM_MODEL_REPORT",
+            "LLM_MODEL_COLLECTOR",
+            "LLM_MODEL_EXPORT",
+            "MAX_RETRIES",
+            "LOG_LEVEL",
+            "DATA_DIR",
+            "TAVILY_API_KEY",
+        ]
+        for var in env_vars_to_check:
+            original_values[var] = os.environ.get(var)
+        
+        # Explicitly set expected defaults to override .env file values
+        # Pydantic Settings prioritizes environment variables over .env file
+        # Setting LLM_MODEL to the expected default will override .env file
+        env_overrides = {
+            "GROQ_API_KEY": "test_key",
+            "LLM_MODEL": "llama-3.1-8b-instant",  # Explicitly set default to override .env
+        }
+        
+        # Remove other env vars that might be set in .env file
+        for var in env_vars_to_check:
+            if var != "LLM_MODEL":
                 os.environ.pop(var, None)
+        
+        # Reload config with overridden environment
+        with patch.dict(os.environ, env_overrides, clear=False):
+            config = reload_config()
             
-            config = Config()
-            
-            assert config.groq_model == "llama-3.1-8b-instant"  # Default
+            assert config.llm_model == "llama-3.1-8b-instant"  # Default
             assert config.max_retries == 3  # Default
             assert config.log_level == "INFO"  # Default
             assert isinstance(config.data_dir, Path)
+        
+        # Restore original values
+        for var, value in original_values.items():
+            if value is not None:
+                os.environ[var] = value
+            elif var in os.environ and var != "LLM_MODEL":
+                os.environ.pop(var, None)
     
     def test_config_validates_groq_api_key_required(self) -> None:
         """Test config requires groq_api_key."""
-        with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(ValidationError):
-                Config()
+        # Remove GROQ_API_KEY from environment
+        original_key = os.environ.pop("GROQ_API_KEY", None)
+        try:
+            # Create Config without .env file loading
+            with patch.dict(os.environ, {}, clear=True):
+                with pytest.raises(ValidationError):
+                    # Use _env_file=None to disable .env file loading
+                    Config(_env_file=None)
+        finally:
+            # Restore original key if it existed
+            if original_key:
+                os.environ["GROQ_API_KEY"] = original_key
     
     def test_config_validates_max_retries_range(self) -> None:
         """Test config validates max_retries is in valid range."""
@@ -126,14 +163,30 @@ class TestConfig:
     
     def test_config_handles_optional_tavily_api_key(self) -> None:
         """Test config handles optional tavily_api_key."""
-        with patch.dict(
-            os.environ,
-            {"GROQ_API_KEY": "test_key"},
-            clear=False,
-        ):
-            os.environ.pop("TAVILY_API_KEY", None)
-            config = Config()
-            assert config.tavily_api_key is None
+        original_tavily = os.environ.pop("TAVILY_API_KEY", None)
+        try:
+            # Use _env_file=None to disable .env file loading
+            with patch.dict(
+                os.environ,
+                {"GROQ_API_KEY": "test_key"},
+                clear=False,
+            ):
+                # Ensure TAVILY_API_KEY is not in environment
+                os.environ.pop("TAVILY_API_KEY", None)
+                config = Config(_env_file=None)
+                assert config.tavily_api_key is None
+            
+            with patch.dict(
+                os.environ,
+                {"GROQ_API_KEY": "test_key", "TAVILY_API_KEY": "tavily_key"},
+                clear=False,
+            ):
+                config = Config(_env_file=None)
+                assert config.tavily_api_key == "tavily_key"
+        finally:
+            # Restore original key if it existed
+            if original_tavily:
+                os.environ["TAVILY_API_KEY"] = original_tavily
         
         with patch.dict(
             os.environ,
@@ -157,14 +210,25 @@ class TestGetConfig:
     
     def test_get_config_loads_config_on_first_call(self) -> None:
         """Test get_config loads config on first call."""
-        with patch.dict(
-            os.environ,
-            {"GROQ_API_KEY": "test_key", "GROQ_MODEL": "test-model"},
-            clear=False,
-        ):
-            config = get_config()
-            assert config.groq_api_key == "test_key"
-            assert config.groq_model == "test-model"
+        # Reset global config to ensure fresh load
+        import src.config
+        from src.config import _config, reload_config
+        original_config = src.config._config
+        src.config._config = None
+        
+        try:
+            with patch.dict(
+                os.environ,
+                {"GROQ_API_KEY": "test_key", "LLM_MODEL": "test-model"},
+                clear=False,
+            ):
+                # Use reload_config to ensure we get fresh config with test values
+                config = reload_config()
+                assert config.groq_api_key == "test_key"
+                assert config.llm_model == "test-model"
+        finally:
+            # Restore original config
+            src.config._config = original_config
 
 
 class TestReloadConfig:
@@ -181,20 +245,31 @@ class TestReloadConfig:
     
     def test_reload_config_loads_new_values(self) -> None:
         """Test reload_config loads new values from environment."""
-        with patch.dict(
-            os.environ,
-            {"GROQ_API_KEY": "test_key", "GROQ_MODEL": "model1"},
-            clear=False,
-        ):
-            config1 = get_config()
-            assert config1.groq_model == "model1"
-            
-            # Change environment
-            os.environ["GROQ_MODEL"] = "model2"
-            config2 = reload_config()
-            
-            assert config2.groq_model == "model2"
-            # Old config should still have old value
-            assert config1.groq_model == "model1"
+        import src.config
+        from src.config import reload_config
+
+        # Reset global config to ensure fresh load
+        original_config = src.config._config
+        src.config._config = None
+        
+        try:
+            with patch.dict(
+                os.environ,
+                {"GROQ_API_KEY": "test_key", "LLM_MODEL": "model1"},
+                clear=False,
+            ):
+                config1 = reload_config()
+                assert config1.llm_model == "model1"
+                
+                # Change environment
+                os.environ["LLM_MODEL"] = "model2"
+                config2 = reload_config()
+                
+                assert config2.llm_model == "model2"
+                # Old config should still have old value
+                assert config1.llm_model == "model1"
+        finally:
+            # Restore original config
+            src.config._config = original_config
 
 

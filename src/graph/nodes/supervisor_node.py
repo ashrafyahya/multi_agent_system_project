@@ -2,21 +2,6 @@
 
 Pure function node that controls workflow flow using SupervisorAgent
 and updates the workflow state.
-
-Example:
-    ```python
-    from src.graph.nodes.supervisor_node import create_supervisor_node
-    from langchain_groq import ChatGroq
-    from src.graph.state import create_initial_state
-    
-    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-    config = {"max_retries": 3}
-    node = create_supervisor_node(llm=llm, config=config)
-    
-    state = create_initial_state("Analyze competitors")
-    state["plan"] = {"tasks": ["Find competitors"]}
-    updated_state = node(state)
-    ```
 """
 
 import logging
@@ -27,13 +12,15 @@ from langchain_core.language_models import BaseChatModel
 from src.agents.supervisor_agent import SupervisorAgent
 from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState
+from src.utils.agent_logger import AgentLogger
 
 logger = logging.getLogger(__name__)
 
 
 def create_supervisor_node(
     llm: BaseChatModel,
-    config: dict[str, Any]
+    config: dict[str, Any],
+    agent_logger: AgentLogger | None = None
 ) -> Any:
     """Create a supervisor node function.
     
@@ -48,17 +35,6 @@ def create_supervisor_node(
     
     Returns:
         Pure function that takes WorkflowState and returns updated WorkflowState
-    
-    Example:
-        ```python
-        from langchain_groq import ChatGroq
-        
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-        config = {"max_retries": 3}
-        node = create_supervisor_node(llm=llm, config=config)
-        
-        state = create_initial_state("Analyze competitors")
-        updated_state = node(state)
         ```
     """
     def supervisor_node(state: WorkflowState) -> WorkflowState:
@@ -73,14 +49,6 @@ def create_supervisor_node(
         
         Returns:
             Updated state with current_task and validation_errors updated
-        
-        Example:
-            ```python
-            state = create_initial_state("Analyze competitors")
-            state["plan"] = {"tasks": ["Find competitors"]}
-            updated_state = supervisor_node(state)
-            assert "current_task" in updated_state
-            ```
         """
         try:
             # Create agent instance
@@ -88,6 +56,19 @@ def create_supervisor_node(
             
             # Execute agent
             updated_state = agent.execute(state)
+            
+            # Log agent output (supervisor updates current_task and validation decisions)
+            if agent_logger and agent_logger.enabled:
+                try:
+                    supervisor_output = {
+                        "current_task": updated_state.get("current_task"),
+                        "validation_errors": updated_state.get("validation_errors", []),
+                        "retry_count": updated_state.get("retry_count", 0),
+                    }
+                    agent_logger.log_agent_output(agent.name, supervisor_output, updated_state)
+                except Exception as e:
+                    # Don't disrupt workflow if logging fails
+                    logger.warning(f"Failed to log supervisor agent output: {e}")
             
             logger.info(
                 f"Supervisor node completed: "

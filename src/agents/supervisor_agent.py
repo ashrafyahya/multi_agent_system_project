@@ -2,21 +2,6 @@
 
 This module implements the SupervisorAgent that controls workflow flow,
 applies business rules, runs validation gates, and triggers retry loops.
-
-Example:
-    ```python
-    from src.agents.supervisor_agent import SupervisorAgent
-    from langchain_groq import ChatGroq
-    from src.graph.state import create_initial_state
-    
-    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-    config = {"max_retries": 3}
-    agent = SupervisorAgent(llm=llm, config=config)
-    
-    state = create_initial_state("Analyze competitors")
-    state["plan"] = {"tasks": ["Collect data"]}
-    updated_state = agent.execute(state)
-    ```
 """
 
 import logging
@@ -55,19 +40,6 @@ class SupervisorAgent(BaseAgent):
     Attributes:
         llm: Language model instance (injected, may be used for decision-making)
         config: Configuration dictionary (injected)
-    
-    Example:
-        ```python
-        from langchain_groq import ChatGroq
-        
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-        config = {"max_retries": 3}
-        agent = SupervisorAgent(llm=llm, config=config)
-        
-        state = create_initial_state("Analyze competitors")
-        state["plan"] = {"tasks": ["Collect data"]}
-        updated_state = agent.execute(state)
-        ```
     """
     
     def execute(self, state: WorkflowState) -> WorkflowState:
@@ -99,19 +71,11 @@ class SupervisorAgent(BaseAgent):
         
         Raises:
             WorkflowError: If workflow state is invalid or supervisor logic fails
-        
-        Example:
-            ```python
-            state = create_initial_state("Analyze competitors")
-            state["plan"] = {"tasks": ["Collect data"]}
-            state["collected_data"] = {"competitors": [...]}
-            
-            updated_state = agent.execute(state)
-            assert updated_state["current_task"] is not None
-            ```
         """
         try:
             new_state = state.copy()
+            if "validation_errors" not in new_state:
+                new_state["validation_errors"] = []
             max_retries = self.config.get("max_retries", 3)
             current_retry_count = state.get("retry_count", 0)
             
@@ -130,82 +94,81 @@ class SupervisorAgent(BaseAgent):
             validation_result = None
             next_action: Literal["continue", "retry", "end"] = "continue"
             
-            if stage == "collector":
-                # Validate collected data
-                collected_data = state.get("collected_data")
-                if collected_data:
-                    validation_result = self._validate_collector_output(collected_data)
-                    if not validation_result.is_valid:
-                        if current_retry_count < max_retries:
-                            next_action = "retry"
-                            new_state["retry_count"] = current_retry_count + 1
-                        else:
-                            next_action = "end"
-                        new_state["validation_errors"].extend(validation_result.errors)
-                        logger.warning(
-                            f"Collector validation failed: {len(validation_result.errors)} errors"
-                        )
+            # Get data from state
+            collected_data = state.get("collected_data")
+            insights = state.get("insights")
+            report = state.get("report")
+            
+            if collected_data and not insights:
+                validation_result = self._validate_collector_output(collected_data)
+                if not validation_result.is_valid:
+                    if current_retry_count < max_retries:
+                        next_action = "retry"
+                        new_state["retry_count"] = current_retry_count + 1
+                        stage = "collector"  # Set stage to collector for proper message formatting
                     else:
-                        logger.info("Collector validation passed")
-                        next_action = "continue"
+                        next_action = "end"
+                    new_state["validation_errors"].extend(validation_result.errors)
+                    logger.warning(
+                        f"Collector validation failed: {len(validation_result.errors)} errors"
+                    )
                 else:
-                    # No data collected yet, continue to collector
+                    logger.info("Collector validation passed")
                     next_action = "continue"
             
-            elif stage == "insight":
-                # Validate insights
-                insights = state.get("insights")
-                if insights:
-                    validation_result = self._validate_insight_output(insights)
-                    if not validation_result.is_valid:
-                        if current_retry_count < max_retries:
-                            next_action = "retry"
-                            new_state["retry_count"] = current_retry_count + 1
-                        else:
-                            next_action = "end"
-                        new_state["validation_errors"].extend(validation_result.errors)
-                        logger.warning(
-                            f"Insight validation failed: {len(validation_result.errors)} errors"
-                        )
+            if insights and next_action != "retry" and next_action != "end":
+                validation_result = self._validate_insight_output(insights)
+                if not validation_result.is_valid:
+                    if current_retry_count < max_retries:
+                        next_action = "retry"
+                        new_state["retry_count"] = current_retry_count + 1
+                        stage = "insight"  # Set stage to insight for proper message formatting
                     else:
-                        logger.info("Insight validation passed")
+                        next_action = "end"
+                    new_state["validation_errors"].extend(validation_result.errors)
+                    logger.warning(
+                        f"Insight validation failed: {len(validation_result.errors)} errors"
+                    )
+                else:
+                    logger.info("Insight validation passed")
+                    if stage == "insight":
                         next_action = "continue"
-                else:
-                    # No insights generated yet, continue to insight agent
-                    next_action = "continue"
             
-            elif stage == "report":
-                # Validate report
-                report = state.get("report")
-                if report:
-                    validation_result = self._validate_report_output(report)
-                    if not validation_result.is_valid:
-                        if current_retry_count < max_retries:
-                            next_action = "retry"
-                            new_state["retry_count"] = current_retry_count + 1
-                        else:
-                            next_action = "end"
-                        new_state["validation_errors"].extend(validation_result.errors)
-                        logger.warning(
-                            f"Report validation failed: {len(validation_result.errors)} errors"
-                        )
+            if report and next_action != "retry" and next_action != "end":
+                validation_result = self._validate_report_output(report)
+                if not validation_result.is_valid:
+                    if current_retry_count < max_retries:
+                        next_action = "retry"
+                        new_state["retry_count"] = current_retry_count + 1
+                        stage = "report"  # Set stage to report for proper message formatting
                     else:
-                        logger.info("Report validation passed")
-                        next_action = "end"  # Workflow complete
+                        next_action = "end"
+                    new_state["validation_errors"].extend(validation_result.errors)
+                    logger.warning(
+                        f"Report validation failed: {len(validation_result.errors)} errors"
+                    )
                 else:
-                    # No report generated yet, continue to report agent
-                    next_action = "continue"
+                    logger.info("Report validation passed")
+                    next_action = "end"
+            
+            if next_action == "continue":
+                if stage == "collector":
+                    if not collected_data:
+                        next_action = "continue"
+                elif stage == "insight":
+                    if not insights:
+                        next_action = "continue"
+                elif stage == "report":
+                    if not report:
+                        next_action = "continue"
             
             elif stage == "complete":
-                # Workflow already complete
                 next_action = "end"
             
-            # Update state with supervisor decision
             new_state["current_task"] = self._format_task_message(stage, next_action)
             
             if validation_result and validation_result.warnings:
                 logger.info(f"Validation warnings: {len(validation_result.warnings)}")
-                # Add warnings to validation_errors for visibility
                 new_state["validation_errors"].extend(
                     [f"Warning: {w}" for w in validation_result.warnings]
                 )
@@ -285,10 +248,10 @@ class SupervisorAgent(BaseAgent):
             from src.graph.validators.base_validator import ValidationResult
             
             result = ValidationResult.success()
-            if len(data.strip()) < 500:
+            if len(data.strip()) < 1200:
                 result.add_error(
                     f"Report length ({len(data.strip())} chars) is less than "
-                    "minimum required (500 chars)"
+                    "minimum required (1200 chars)"
                 )
             return result
         
@@ -298,10 +261,10 @@ class SupervisorAgent(BaseAgent):
             if "report" in data and isinstance(data["report"], str):
                 report_str = data["report"]
                 result = ValidationResult.success()
-                if len(report_str.strip()) < 500:
+                if len(report_str.strip()) < 1200:
                     result.add_error(
                         f"Report length ({len(report_str.strip())} chars) is less than "
-                        "minimum required (500 chars)"
+                        "minimum required (1200 chars)"
                     )
                 return result
             # Otherwise, validate as structured report dict

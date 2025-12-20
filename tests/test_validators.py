@@ -643,13 +643,13 @@ class TestInsightValidator:
         data = {
             "swot": {
                 "strengths": ["Strong brand", "Market leader"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader in SaaS",
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
             "trends": ["Digital transformation", "AI integration"],
-            "opportunities": ["Expansion into Asia"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         validator = InsightValidator()
         result = validator.validate(data)
@@ -726,21 +726,21 @@ class TestInsightValidator:
         
         data = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Short",  # Too short
-            "trends": ["Digital transformation"],
+            "positioning": "Short",  # Too short (< 50)
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         validator = InsightValidator()
         result = validator.validate(data)
         
-        # Should be valid but have warning
-        assert result.is_valid is True
-        assert len(result.warnings) > 0
-        assert any("positioning" in warn.lower() and "short" in warn.lower() for warn in result.warnings)
+        # Should fail validation (positioning too short)
+        assert result.is_valid is False
+        assert any("positioning" in err.lower() and "short" in err.lower() for err in result.errors)
     
     def test_insight_validator_trends_coherence(self) -> None:
         """Test insight validator validates trends coherence."""
@@ -856,19 +856,19 @@ class TestInsightValidator:
         """Test that insight validator counts insights correctly."""
         from src.graph.validators.insight_validator import InsightValidator
         
-        # Data with exactly 3 insights
+        # Data with enough insights to meet minimum requirements
         data = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": [],
-                "threats": [],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",  # +1
-            "trends": [],
-            "opportunities": [],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",  # +1
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
-        # Total: 2 SWOT items + 1 positioning = 3 insights
+        # Total: 8 SWOT items + 1 positioning + 2 trends + 2 opportunities = 13 insights (more than minimum of 8)
         validator = InsightValidator()
         result = validator.validate(data)
         
@@ -880,13 +880,14 @@ class TestInsightValidator:
         
         data = {
             "swot": {
-                "strengths": ["", "   ", "Valid strength"],  # Empty items should be ignored
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["", "   ", "Valid strength", "Another strength"],  # Empty items should be ignored, need 2+
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": ["Digital transformation"],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         validator = InsightValidator()
         result = validator.validate(data)
@@ -902,12 +903,14 @@ class TestReportValidator:
         """Test report validator with valid data."""
         from src.graph.validators.report_validator import ReportValidator
         
+        # Create data with enough characters to meet min_length requirement
+        # Executive summary needs at least 200 chars, others need 300 chars, total needs at least 1200
         data = {
-            "executive_summary": "This is a comprehensive executive summary of the competitor analysis findings.",
-            "swot_breakdown": "The SWOT analysis reveals key strengths, weaknesses, opportunities, and threats.",
-            "competitor_overview": "The competitor overview provides detailed information about market players.",
-            "recommendations": "Based on the analysis, we recommend strategic actions for market positioning.",
-            "min_length": 500,
+            "executive_summary": "This is a comprehensive executive summary of the competitor analysis findings with detailed insights and key observations. The analysis covers multiple market segments and provides strategic recommendations for business growth and competitive positioning in the marketplace. " * 2,
+            "swot_breakdown": "The SWOT analysis reveals key strengths, weaknesses, opportunities, and threats in the competitive landscape. This detailed breakdown helps identify strategic priorities and areas for improvement. The analysis covers multiple dimensions including market position, product capabilities, customer relationships, and operational efficiency across different market segments. " * 2,
+            "competitor_overview": "The competitor overview provides detailed information about market players and their positioning strategies. This section analyzes competitive dynamics and market structure. It examines how different competitors approach the market, their unique value propositions, target customer segments, and strategic initiatives that drive their competitive advantage. " * 2,
+            "recommendations": "Based on the analysis, we recommend strategic actions for market positioning and competitive advantage. These recommendations are designed to enhance market performance and drive sustainable growth. The strategic roadmap includes product development initiatives, market expansion strategies, customer acquisition approaches, and operational improvements. " * 2,
+            "min_length": 1200,
         }
         validator = ReportValidator()
         result = validator.validate(data)
@@ -971,13 +974,13 @@ class TestReportValidator:
         """Test report validator respects custom min_length."""
         from src.graph.validators.report_validator import ReportValidator
         
-        # Total length = 300, custom min_length = 250 (should pass)
+        # Total length = 1100, custom min_length = 1000 (should pass)
         data = {
-            "executive_summary": "A" * 75,
-            "swot_breakdown": "B" * 75,
-            "competitor_overview": "C" * 75,
-            "recommendations": "D" * 75,
-            "min_length": 250,
+            "executive_summary": "A" * 200,
+            "swot_breakdown": "B" * 300,
+            "competitor_overview": "C" * 300,
+            "recommendations": "D" * 300,
+            "min_length": 1000,
         }
         validator = ReportValidator()
         result = validator.validate(data)
@@ -988,13 +991,13 @@ class TestReportValidator:
         """Test report validator warns about short summary."""
         from src.graph.validators.report_validator import ReportValidator
         
-        # Summary exactly 50 chars (minimum, but short)
+        # Summary exactly 200 chars (minimum, but short - should get warning)
         data = {
-            "executive_summary": "A" * 50,
-            "swot_breakdown": "B" * 100,
-            "competitor_overview": "C" * 100,
-            "recommendations": "D" * 100,
-            "min_length": 200,
+            "executive_summary": "A" * 200,
+            "swot_breakdown": "B" * 300,
+            "competitor_overview": "C" * 300,
+            "recommendations": "D" * 300,
+            "min_length": 1000,
         }
         validator = ReportValidator()
         result = validator.validate(data)
@@ -1010,11 +1013,11 @@ class TestReportValidator:
         
         # Repetitive summary (same word repeated)
         data = {
-            "executive_summary": "word word word word word word word word word word " * 5,  # Repetitive
-            "swot_breakdown": "B" * 100,
-            "competitor_overview": "C" * 100,
-            "recommendations": "D" * 100,
-            "min_length": 200,
+            "executive_summary": "word word word word word word word word word word " * 20,  # Repetitive, but meets 200 char minimum
+            "swot_breakdown": "B" * 300,
+            "competitor_overview": "C" * 300,
+            "recommendations": "D" * 300,
+            "min_length": 1000,
         }
         validator = ReportValidator()
         result = validator.validate(data)
@@ -1101,16 +1104,203 @@ class TestReportValidator:
         """Test report validator uses default min_length when not specified."""
         from src.graph.validators.report_validator import ReportValidator
         
-        # Total length = 400, default min_length = 500 (should fail)
+        # Total length = 1100, default min_length = 1200 (should fail)
         data = {
-            "executive_summary": "A" * 100,
-            "swot_breakdown": "B" * 100,
-            "competitor_overview": "C" * 100,
-            "recommendations": "D" * 100,
-            # No min_length specified, should use default 500
+            "executive_summary": "A" * 200,
+            "swot_breakdown": "B" * 300,
+            "competitor_overview": "C" * 300,
+            "recommendations": "D" * 300,
+            # No min_length specified, should use default 1200
         }
         validator = ReportValidator()
         result = validator.validate(data)
         
         assert result.is_valid is False
-        assert any("500" in err for err in result.errors)
+        assert any("1200" in err for err in result.errors)
+
+
+class TestDataConsistencyValidator:
+    """Tests for DataConsistencyValidator."""
+    
+    def test_data_consistency_validator_name(self) -> None:
+        """Test validator name property."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        validator = DataConsistencyValidator()
+        assert validator.name == "data_consistency_validator"
+    
+    def test_data_consistency_validator_valid_data(self) -> None:
+        """Test validator with valid, consistent data."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        data = {
+            "competitors": [
+                {
+                    "name": "Competitor A",
+                    "market_share": 35.0,
+                    "revenue": 2000000000,
+                },
+                {
+                    "name": "Competitor B",
+                    "market_share": 25.0,
+                    "revenue": 1500000000,
+                },
+                {
+                    "name": "Competitor C",
+                    "market_share": 20.0,
+                    "revenue": 1000000000,
+                },
+            ]
+        }
+        validator = DataConsistencyValidator()
+        result = validator.validate(data)
+        
+        assert result.is_valid is True
+        assert len(result.warnings) == 0
+    
+    def test_data_consistency_validator_low_market_share_sum(self) -> None:
+        """Test validator detects low market share sum."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        data = {
+            "competitors": [
+                {"name": "Competitor A", "market_share": 15.0},
+                {"name": "Competitor B", "market_share": 10.0},
+            ]
+        }
+        validator = DataConsistencyValidator()
+        result = validator.validate(data)
+        
+        assert result.is_valid is True  # Warnings don't fail validation
+        assert result.has_warnings() is True
+        assert any("below the expected minimum" in w for w in result.warnings)
+    
+    def test_data_consistency_validator_high_market_share_sum(self) -> None:
+        """Test validator detects high market share sum."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        data = {
+            "competitors": [
+                {"name": "Competitor A", "market_share": 60.0},
+                {"name": "Competitor B", "market_share": 70.0},
+            ]
+        }
+        validator = DataConsistencyValidator()
+        result = validator.validate(data)
+        
+        assert result.is_valid is True
+        assert result.has_warnings() is True
+        assert any("exceeds the expected maximum" in w for w in result.warnings)
+    
+    def test_data_consistency_validator_unrealistic_market_share(self) -> None:
+        """Test validator detects unrealistic market share values."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        data = {
+            "competitors": [
+                {"name": "Competitor A", "market_share": 120.0},  # > 100%
+                {"name": "Competitor B", "market_share": -5.0},   # Negative
+            ]
+        }
+        validator = DataConsistencyValidator()
+        result = validator.validate(data)
+        
+        assert result.is_valid is True
+        assert result.has_warnings() is True
+        assert any("exceeds 100%" in w for w in result.warnings)
+        assert any("cannot be negative" in w for w in result.warnings)
+    
+    def test_data_consistency_validator_revenue_inconsistency(self) -> None:
+        """Test validator detects revenue/market share inconsistencies."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        data = {
+            "competitors": [
+                {"name": "Competitor A", "market_share": 50.0, "revenue": 500000000},  # Higher share but much lower revenue
+                {"name": "Competitor B", "market_share": 20.0, "revenue": 2000000000},  # Lower share but much higher revenue
+            ]
+        }
+        validator = DataConsistencyValidator()
+        result = validator.validate(data)
+        
+        assert result.is_valid is True
+        # Should detect that Competitor A has higher market share but lower revenue
+        assert result.has_warnings() is True
+        assert any("revenue inconsistency" in w.lower() for w in result.warnings)
+    
+    def test_data_consistency_validator_conflicting_data(self) -> None:
+        """Test validator detects conflicting data for same competitor."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        data = {
+            "competitors": [
+                {"name": "Competitor A", "market_share": 35.0, "source_url": "https://source1.com"},
+                {"name": "Competitor A", "market_share": 40.0, "source_url": "https://source2.com"},
+            ]
+        }
+        validator = DataConsistencyValidator()
+        result = validator.validate(data)
+        
+        assert result.is_valid is True
+        assert result.has_warnings() is True
+        assert any("conflicting" in w.lower() and "market share" in w.lower() for w in result.warnings)
+    
+    def test_data_consistency_validator_empty_data(self) -> None:
+        """Test validator with empty competitor list."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        data = {"competitors": []}
+        validator = DataConsistencyValidator()
+        result = validator.validate(data)
+        
+        assert result.is_valid is True
+        assert len(result.warnings) == 0
+    
+    def test_data_consistency_validator_no_market_share_data(self) -> None:
+        """Test validator with no market share data."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        data = {
+            "competitors": [
+                {"name": "Competitor A", "revenue": 1000000000},
+                {"name": "Competitor B", "revenue": 2000000000},
+            ]
+        }
+        validator = DataConsistencyValidator()
+        result = validator.validate(data)
+        
+        assert result.is_valid is True
+        # Should not warn about market share sum if no market share data
+        assert not any("market share percentages sum" in w for w in result.warnings)
+    
+    def test_data_consistency_validator_invalid_data_structure(self) -> None:
+        """Test validator handles invalid data structure."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        validator = DataConsistencyValidator()
+        
+        # Test with non-dict
+        result = validator.validate("not a dict")
+        assert result.is_valid is False
+        assert any("must be a dictionary" in err for err in result.errors)
+        
+        # Test with non-list competitors
+        result = validator.validate({"competitors": "not a list"})
+        assert result.is_valid is False
+        assert any("must be a list" in err for err in result.errors)
+    
+    def test_data_consistency_validator_revenue_string_parsing(self) -> None:
+        """Test validator parses revenue strings correctly."""
+        from src.graph.validators.data_consistency_validator import DataConsistencyValidator
+        
+        data = {
+            "competitors": [
+                {"name": "Competitor A", "market_share": 30.0, "revenue": "$1.5B"},
+                {"name": "Competitor B", "market_share": 20.0, "revenue": "$500M"},
+            ]
+        }
+        validator = DataConsistencyValidator()
+        result = validator.validate(data)
+        
+        # Should not error on string revenue values
+        assert result.is_valid is True

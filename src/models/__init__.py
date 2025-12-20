@@ -5,10 +5,14 @@ This package contains Pydantic models for:
 - CompetitorProfile: Structured competitor data
 - Insight: Business insights with SWOT analysis
 - Report: Final competitor analysis report
+- PDFBrandingConfig: PDF branding configuration
+- PDFLayoutConfig: PDF layout configuration
 """
 
 from src.models.competitor_profile import CompetitorProfile
 from src.models.insight_model import Insight, SWOT
+from src.models.pdf_branding_config import PDFBrandingConfig
+from src.models.pdf_layout_config import PDFLayoutConfig
 from src.models.plan_model import Plan
 from src.models.report_model import Report
 
@@ -18,4 +22,6 @@ __all__ = [
     "SWOT",
     "Insight",
     "Report",
+    "PDFBrandingConfig",
+    "PDFLayoutConfig",
 ]

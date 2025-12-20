@@ -111,7 +111,7 @@ def _extract_text_from_html(html_content: str, url: str) -> dict[str, Any]:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type((requests.RequestException,)),
+    retry=retry_if_exception_type((requests.RequestException, requests.Timeout)),
     reraise=True,
 )
 def _fetch_url_content(url: str, timeout: int) -> tuple[str, str]:

@@ -8,26 +8,6 @@ The Agent Pattern ensures that:
 - Agents communicate through state objects, not direct method calls
 - Agents are stateless (state passed in, not stored)
 - Dependencies (LLM, config) are injected, not created internally
-
-Example:
-    ```python
-    from src.agents.base_agent import BaseAgent
-    from src.graph.state import WorkflowState
-    from langchain_groq import ChatGroq
-    
-    class MyAgent(BaseAgent):
-        @property
-        def name(self) -> str:
-            return "my_agent"
-        
-        def execute(self, state: WorkflowState) -> WorkflowState:
-            # Agent logic here
-            return state
-    
-    llm = ChatGroq(model="llama-3.1-8b-instant")
-    config = {"max_retries": 3}
-    agent = MyAgent(llm=llm, config=config)
-    ```
 """
 
 from abc import ABC, abstractmethod
@@ -57,29 +37,6 @@ class BaseAgent(ABC):
     Attributes:
         llm: Language model instance (injected dependency)
         config: Configuration dictionary (injected dependency)
-    
-    Example:
-        ```python
-        from src.agents.base_agent import BaseAgent
-        from src.graph.state import WorkflowState
-        from langchain_groq import ChatGroq
-        
-        class PlannerAgent(BaseAgent):
-            @property
-            def name(self) -> str:
-                return "planner_agent"
-            
-            def execute(self, state: WorkflowState) -> WorkflowState:
-                # Generate plan from user request
-                user_query = state["messages"][-1].content
-                plan = self._generate_plan(user_query)
-                state["plan"] = plan
-                return state
-        
-        llm = ChatGroq(model="llama-3.1-8b-instant")
-        config = {"temperature": 0}
-        agent = PlannerAgent(llm=llm, config=config)
-        ```
     """
     
     def __init__(self, llm: BaseChatModel, config: dict[str, Any]) -> None:
@@ -103,15 +60,6 @@ class BaseAgent(ABC):
         Raises:
             TypeError: If llm is not a BaseChatModel instance
             ValueError: If config is not a dictionary
-        
-        Example:
-            ```python
-            from langchain_groq import ChatGroq
-            
-            llm = ChatGroq(model="llama-3.1-8b-instant")
-            config = {"temperature": 0, "max_retries": 3}
-            agent = PlannerAgent(llm=llm, config=config)
-            ```
         """
         if not isinstance(llm, BaseChatModel):
             raise TypeError(
@@ -160,23 +108,6 @@ class BaseAgent(ABC):
             WorkflowError: If agent execution fails critically and cannot be
                 recovered. Most errors should be handled gracefully and added
                 to validation_errors in the state.
-        
-        Example:
-            ```python
-            def execute(self, state: WorkflowState) -> WorkflowState:
-                # Extract user query
-                user_message = state["messages"][-1]
-                query = user_message.content
-                
-                # Perform agent operation
-                result = self._perform_operation(query)
-                
-                # Update state
-                state["plan"] = result
-                state["current_task"] = "Planning completed"
-                
-                return state
-            ```
         """
         pass
     
@@ -192,12 +123,5 @@ class BaseAgent(ABC):
         Returns:
             String identifier for this agent. Should be lowercase with underscores,
             e.g., "planner_agent", "data_collector_agent", "insight_agent"
-        
-        Example:
-            ```python
-            @property
-            def name(self) -> str:
-                return "planner_agent"
-            ```
         """
         pass

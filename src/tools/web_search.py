@@ -32,7 +32,7 @@ except ImportError:
     from langchain_community.tools.tavily_search import TavilySearchResults
     TAVILY_SEARCH_CLASS = TavilySearchResults
 from langchain_core.tools import tool
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from src.config import get_config
 from src.exceptions.collector_error import CollectorError
@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((CollectorError,)),
     reraise=True,
 )
 def _perform_tavily_search(query: str, max_results: int, api_key: str | None) -> list[dict[str, Any]]:
@@ -246,9 +247,9 @@ def web_search(query: str, max_results: int = 10) -> dict[str, Any]:
                 "count": 0,
             }
         
-        # Perform search with retry logic
         logger.info(f"Performing web search: query='{query}', max_results={max_results}")
         results = _perform_tavily_search(query, max_results, api_key)
+        results = results[:max_results]
         
         logger.info(f"Web search successful: found {len(results)} results")
         
@@ -260,10 +261,8 @@ def web_search(query: str, max_results: int = 10) -> dict[str, Any]:
         }
         
     except CollectorError:
-        # Re-raise CollectorError as-is
         raise
     except Exception as e:
-        # Handle unexpected errors
         error_msg = f"Unexpected error during web search: {str(e)}"
         logger.error(error_msg, exc_info=True)
         

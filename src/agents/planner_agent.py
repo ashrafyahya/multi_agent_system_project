@@ -10,9 +10,14 @@ Example:
     from langchain_groq import ChatGroq
     from src.graph.state import create_initial_state
     
-    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-    config = {"temperature": 0}
-    agent = PlannerAgent(llm=llm, config=config)
+    from src.config import get_config
+    from src.main import initialize_llms_for_agents
+    
+    config = get_config()
+    agent_llms = initialize_llms_for_agents(config)
+    llm = agent_llms["planner"]
+    agent_config = {"temperature": 0}
+    agent = PlannerAgent(llm=llm, config=agent_config)
     
     state = create_initial_state("Analyze competitors in SaaS market")
     updated_state = agent.execute(state)
@@ -53,53 +58,72 @@ class PlannerAgent(BaseAgent):
     Attributes:
         llm: Language model instance (injected)
         config: Configuration dictionary (injected)
-    
-    Example:
-        ```python
-        from langchain_groq import ChatGroq
-        
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-        config = {"temperature": 0}
-        agent = PlannerAgent(llm=llm, config=config)
-        
-        state = create_initial_state("Analyze competitors")
-        updated_state = agent.execute(state)
-        plan_data = updated_state["plan"]
-        ```
     """
     
-    SYSTEM_PROMPT = """You are a strategic planning agent specialized in competitor analysis.
+    SYSTEM_PROMPT = """You are an expert strategic planning consultant specializing in competitive intelligence and market analysis.
 
-Your task is to break down competitor analysis requests into actionable, structured plans.
+Your role is to transform business requests into actionable, data-driven execution plans for comprehensive competitor analysis.
 
-When given a user request, analyze it and create a comprehensive execution plan that includes:
+**Core Principles:**
+- Prioritize actionable, measurable tasks that lead to strategic insights
+- Consider industry context, market dynamics, and business objectives
+- Balance comprehensiveness with efficiency
+- Focus on data quality over quantity
 
-1. **Tasks**: A list of specific, actionable tasks to accomplish the analysis
-   - Each task should be clear and specific
-   - Tasks should cover: data collection, analysis, and insights generation
-   - Example: "Collect pricing information for top 5 competitors"
+**When analyzing a user request, create a strategic execution plan:**
 
-2. **Preferred Sources**: List of preferred data sources
-   - Common sources: "web search", "official website", "industry reports"
-   - Specify sources that would be most relevant for the analysis
+1. **Tasks** (3-8 specific, prioritized tasks):
+   - Start with market/industry context gathering
+   - Focus on direct competitors first, then indirect competitors
+   - Include quantitative data collection (pricing, market share, revenue, user metrics)
+   - Cover product/service features, positioning, and go-to-market strategies
+   - Consider recent news, funding, partnerships, and strategic moves
+   - Tasks should be SMART: Specific, Measurable, Achievable, Relevant, Time-bound
+   - Example: "Collect pricing tiers and feature comparison for top 5 SaaS competitors in the CRM space"
 
-3. **Minimum Results**: The minimum number of competitor sources/data points needed
-   - Should be at least 4 for comprehensive analysis
-   - Consider the scope of the request when determining this number
+2. **Preferred Sources** (prioritized list):
+   - Primary: Official websites, product pages, pricing pages, investor relations
+   - Secondary: Industry reports (Gartner, Forrester, IDC), market research firms
+   - Tertiary: News articles, press releases, social media, review sites (G2, Capterra)
+   - Consider: Financial filings (for public companies), patent databases, job postings
+   - Specify: "official website", "industry reports", "news articles", "review platforms", "financial filings"
 
-4. **Search Strategy**: Overall approach to gathering information
-   - Options: "comprehensive" (broad, thorough search), "focused" (targeted, specific search)
-   - Choose based on the request scope and urgency
+3. **Minimum Results** (intelligent determination):
+   - Base minimum: 4-6 competitors for comprehensive analysis
+   - Adjust based on request scope:
+     * Narrow market/niche: 3-5 competitors
+     * Broad market: 6-10 competitors
+     * Enterprise/strategic analysis: 8-12 competitors
+   - Consider market concentration (oligopoly vs. fragmented market)
 
-Return your response as a valid JSON object with this exact structure:
+4. **Search Strategy** (context-aware selection):
+   - "comprehensive": Use for strategic planning, market entry, investment decisions
+     * Broad market coverage, multiple data sources, deep analysis
+   - "focused": Use for quick competitive checks, feature comparisons, pricing analysis
+     * Targeted search, specific competitors, time-sensitive decisions
+   - Choose based on: request urgency, decision timeline, analysis depth needed
+
+**Output Format:**
+Return ONLY a valid JSON object with this exact structure (no markdown, no explanations):
 {{
     "tasks": ["task1", "task2", "task3"],
-    "preferred_sources": ["web search", "official website"],
+    "preferred_sources": ["source1", "source2"],
     "minimum_results": 4,
     "search_strategy": "comprehensive"
 }}
 
-Ensure the JSON is valid and all fields are present. The tasks list must contain at least one task."""
+**Quality Requirements:**
+- All tasks must be actionable and specific
+- Minimum 3 tasks, maximum 8 tasks
+- At least 3 different source types
+- minimum_results must be between 3 and 15
+- search_strategy must be exactly "comprehensive" or "focused"
+- JSON must be valid and parseable
+
+**Error Prevention:**
+- If request is ambiguous, infer reasonable scope based on context
+- If industry is unclear, include tasks to identify market segment
+- Always include at least one quantitative data collection task"""
 
     def execute(self, state: WorkflowState) -> WorkflowState:
         """Generate execution plan from user request.
@@ -118,13 +142,6 @@ Ensure the JSON is valid and all fields are present. The tasks list must contain
             WorkflowError: If plan generation fails critically after retries
                 or if user request cannot be extracted
         
-        Example:
-            ```python
-            state = create_initial_state("Analyze competitors in SaaS market")
-            updated_state = agent.execute(state)
-            plan = updated_state["plan"]
-            assert plan["tasks"] is not None
-            ```
         """
         try:
             # Extract user request
@@ -137,7 +154,6 @@ Ensure the JSON is valid and all fields are present. The tasks list must contain
             
             logger.info(f"Generating plan for request: {user_request[:100]}...")
             
-            # Ensure LLM uses deterministic temperature
             temperature = self.config.get("temperature", 0)
             if temperature != 0:
                 logger.warning(
@@ -145,10 +161,8 @@ Ensure the JSON is valid and all fields are present. The tasks list must contain
                     f"got temperature={temperature}. Consider updating config."
                 )
             
-            # Generate plan using LLM
             plan_data = self._generate_plan(user_request)
             
-            # Validate plan against Plan model
             try:
                 plan_model = Plan(**plan_data)
                 plan_dict = plan_model.model_dump()
@@ -159,7 +173,6 @@ Ensure the JSON is valid and all fields are present. The tasks list must contain
                     context={"validation_errors": str(e), "plan_data": plan_data}
                 ) from e
             
-            # Update state
             new_state = state.copy()
             new_state["plan"] = plan_dict
             new_state["current_task"] = "Planning completed"
@@ -193,12 +206,6 @@ Ensure the JSON is valid and all fields are present. The tasks list must contain
         Returns:
             User request string, or empty string if no user message found
         
-        Example:
-            ```python
-            state = create_initial_state("Analyze competitors")
-            request = agent._extract_user_request(state)
-            assert request == "Analyze competitors"
-            ```
         """
         messages = state.get("messages", [])
         
@@ -233,25 +240,16 @@ Ensure the JSON is valid and all fields are present. The tasks list must contain
         Raises:
             WorkflowError: If LLM invocation fails or response cannot be parsed
         
-        Example:
-            ```python
-            plan_data = agent._generate_plan("Analyze competitors")
-            assert "tasks" in plan_data
-            assert isinstance(plan_data["tasks"], list)
-            ```
         """
         try:
-            # Create prompt
             prompt = ChatPromptTemplate.from_messages([
                 ("system", self.SYSTEM_PROMPT),
                 ("human", user_request)
             ])
             
-            # Invoke LLM
             messages = prompt.format_messages()
             response = self.llm.invoke(messages)
             
-            # Extract content
             content = response.content if hasattr(response, "content") else str(response)
             
             if not content:
@@ -259,7 +257,6 @@ Ensure the JSON is valid and all fields are present. The tasks list must contain
             
             logger.debug(f"LLM response: {content[:200]}...")
             
-            # Parse plan from response
             plan_data = self._parse_plan_response(content)
             
             return plan_data
@@ -288,19 +285,11 @@ Ensure the JSON is valid and all fields are present. The tasks list must contain
         Raises:
             WorkflowError: If JSON cannot be parsed or plan structure is invalid
         
-        Example:
-            ```python
-            response = '{"tasks": ["task1"], "minimum_results": 4}'
-            plan_data = agent._parse_plan_response(response)
-            assert plan_data["tasks"] == ["task1"]
-            ```
         """
-        # Try to extract JSON from markdown code blocks
         json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
         if json_match:
             json_str = json_match.group(1)
         else:
-            # Try to find JSON object directly
             json_match = re.search(r"\{.*\}", content, re.DOTALL)
             if json_match:
                 json_str = json_match.group(0)
@@ -317,7 +306,6 @@ Ensure the JSON is valid and all fields are present. The tasks list must contain
                 context={"error": str(e), "content_preview": content[:200]}
             ) from e
         
-        # Validate required fields
         required_fields = ["tasks"]
         missing_fields = [field for field in required_fields if field not in plan_data]
         
@@ -327,14 +315,12 @@ Ensure the JSON is valid and all fields are present. The tasks list must contain
                 context={"plan_data": plan_data}
             )
         
-        # Ensure tasks is a list
         if not isinstance(plan_data.get("tasks"), list):
             raise WorkflowError(
                 "Plan 'tasks' field must be a list",
                 context={"plan_data": plan_data}
             )
         
-        # Set defaults for optional fields
         plan_data.setdefault("preferred_sources", [])
         plan_data.setdefault("minimum_results", 4)
         plan_data.setdefault("search_strategy", "comprehensive")

@@ -9,9 +9,13 @@ Example:
     from langchain_groq import ChatGroq
     from src.graph.state import create_initial_state
     
-    llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-    config = {"max_retries": 3, "temperature": 0}
-    workflow = create_workflow(llm=llm, config=config)
+    from src.config import get_config
+    from src.main import initialize_llms_for_agents
+    
+    config = get_config()
+    agent_llms = initialize_llms_for_agents(config)
+    workflow_config = {"max_retries": 3, "agent_llms": agent_llms}
+    workflow = create_workflow(llm=agent_llms["planner"], config=workflow_config)
     
     state = create_initial_state("Analyze competitors in SaaS market")
     result = workflow.invoke(state)
@@ -34,6 +38,8 @@ from src.graph.nodes.retry_node import create_retry_node
 from src.graph.nodes.supervisor_node import create_supervisor_node
 from src.graph.state import WorkflowState
 from src.graph.validators.collector_validator import CollectorValidator
+from src.graph.validators.data_consistency_validator import \
+    DataConsistencyValidator
 from src.graph.validators.insight_validator import InsightValidator
 from src.graph.validators.report_validator import ReportValidator
 
@@ -64,10 +70,12 @@ def create_workflow(
     - If validation fails and max retries exceeded → end workflow
     
     Args:
-        llm: Language model instance for all agents
+        llm: Language model instance (used as fallback if agent_llms not provided)
         config: Configuration dictionary containing:
             - max_retries: Maximum retry attempts (default: 3)
             - temperature: LLM temperature (default: 0 for planner/supervisor, 0.7 for others)
+            - agent_llms: Optional dictionary mapping agent names to LLM instances
+                (e.g., {"planner": llm, "insight": llm, ...})
     
     Returns:
         Compiled StateGraph ready for execution
@@ -77,10 +85,16 @@ def create_workflow(
         from langchain_groq import ChatGroq
         from src.graph.workflow import create_workflow
         from src.graph.state import create_initial_state
+        from src.config import get_config
+        from src.main import initialize_llms_for_agents
         
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-        config = {"max_retries": 3}
-        workflow = create_workflow(llm=llm, config=config)
+        config = get_config()
+        agent_llms = initialize_llms_for_agents(config)
+        workflow_config = {
+            "max_retries": 3,
+            "agent_llms": agent_llms
+        }
+        workflow = create_workflow(llm=agent_llms["planner"], config=workflow_config)
         
         state = create_initial_state("Analyze competitors")
         result = workflow.invoke(state)
@@ -88,6 +102,8 @@ def create_workflow(
     """
     # Extract configuration
     max_retries = config.get("max_retries", 3)
+    agent_llms = config.get("agent_llms")
+    agent_logger = config.get("agent_logger")
     planner_config = config.copy()
     planner_config["temperature"] = config.get("planner_temperature", 0)
     supervisor_config = config.copy()
@@ -100,15 +116,32 @@ def create_workflow(
     report_config["temperature"] = config.get("report_temperature", 0.7)
     export_config = config.copy()
     export_config["export_format"] = config.get("export_format", "pdf")
-    export_config["include_visualizations"] = config.get("include_visualizations", True)
+    
+    # Get LLM instances for each agent (use agent_llms if available, otherwise fall back to single llm)
+    planner_llm = agent_llms.get("planner", llm) if agent_llms else llm
+    supervisor_llm = agent_llms.get("supervisor", llm) if agent_llms else llm
+    collector_llm = agent_llms.get("collector", llm) if agent_llms else llm
+    insight_llm = agent_llms.get("insight", llm) if agent_llms else llm
+    report_llm = agent_llms.get("report", llm) if agent_llms else llm
+    export_llm = agent_llms.get("export", llm) if agent_llms else llm
+    
+    # Log which models are being used
+    if agent_llms:
+        logger.info(
+            f"Using tiered model configuration: "
+            f"planner={getattr(planner_llm, 'model', 'unknown')}, "
+            f"supervisor={getattr(supervisor_llm, 'model', 'unknown')}, "
+            f"insight={getattr(insight_llm, 'model', 'unknown')}, "
+            f"report={getattr(report_llm, 'model', 'unknown')}"
+        )
     
     # Create node functions
-    planner_node_func = create_planner_node(llm=llm, config=planner_config)
-    supervisor_node_func = create_supervisor_node(llm=llm, config=supervisor_config)
-    collector_node_func = create_data_collector_node(llm=llm, config=collector_config)
-    insight_node_func = create_insight_node(llm=llm, config=insight_config)
-    report_node_func = create_report_node(llm=llm, config=report_config)
-    export_node_func = create_export_node(llm=llm, config=export_config)
+    planner_node_func = create_planner_node(llm=planner_llm, config=planner_config, agent_logger=agent_logger)
+    supervisor_node_func = create_supervisor_node(llm=supervisor_llm, config=supervisor_config, agent_logger=agent_logger)
+    collector_node_func = create_data_collector_node(llm=collector_llm, config=collector_config, agent_logger=agent_logger)
+    insight_node_func = create_insight_node(llm=insight_llm, config=insight_config, agent_logger=agent_logger)
+    report_node_func = create_report_node(llm=report_llm, config=report_config, agent_logger=agent_logger)
+    export_node_func = create_export_node(llm=export_llm, config=export_config, agent_logger=agent_logger)
     retry_node_func = create_retry_node(max_retries=max_retries)
     
     # Build graph
@@ -243,8 +276,8 @@ def _supervisor_decision(
     if has_plan and not has_collected_data:
         return "collector"
     
-    # If we have validation errors and retries available, go to retry
-    if validation_errors and retry_count < max_retries:
+    # If we have validation errors and retries available, go to retry (only if plan exists)
+    if validation_errors and retry_count < max_retries and has_plan:
         return "retry"
     
     # Default: if we have a plan, try collector
@@ -278,7 +311,7 @@ def _validate_collector_output(
     if result.is_valid:
         logger.info("Collector validation passed, proceeding to insight")
         return "insight"
-    elif retry_count < max_retries:
+    elif retry_count < max_retries and state.get("plan"):
         logger.warning(
             f"Collector validation failed ({len(result.errors)} errors), "
             f"retrying (attempt {retry_count + 1}/{max_retries})"
@@ -298,6 +331,9 @@ def _validate_insight_output(
 ) -> Literal["report", "retry", END]:
     """Validate insight output and decide next step.
     
+    Also performs data consistency validation and stores warnings in state
+    for the report agent to reference.
+    
     Args:
         state: Current workflow state
         max_retries: Maximum retry attempts
@@ -311,10 +347,29 @@ def _validate_insight_output(
     
     retry_count = state.get("retry_count", 0)
     
+    # Perform data consistency validation if we have collected data
+    collected_data = state.get("collected_data")
+    validation_warnings: list[str] = []
+    
+    if collected_data and isinstance(collected_data, dict):
+        consistency_validator = DataConsistencyValidator()
+        consistency_result = consistency_validator.validate(collected_data)
+        
+        if consistency_result.has_warnings():
+            validation_warnings = consistency_result.warnings
+            logger.info(
+                f"Data consistency validation found {len(validation_warnings)} warnings"
+            )
+            for warning in validation_warnings:
+                logger.debug(f"Data consistency warning: {warning}")
+    
+    if validation_warnings:
+        state["validation_warnings"] = validation_warnings  # type: ignore
+    
     if result.is_valid:
         logger.info("Insight validation passed, proceeding to report")
         return "report"
-    elif retry_count < max_retries:
+    elif retry_count < max_retries and state.get("plan"):
         logger.warning(
             f"Insight validation failed ({len(result.errors)} errors), "
             f"retrying (attempt {retry_count + 1}/{max_retries})"
@@ -345,7 +400,7 @@ def _validate_report_output(
     
     # Report is stored as a formatted string in state
     # We perform basic validation: check if report exists and has minimum length
-    min_length = 500
+    min_length = 1200
     
     if report and len(report.strip()) >= min_length:
         logger.info("Report validation passed, proceeding to export")
@@ -353,7 +408,7 @@ def _validate_report_output(
     
     retry_count = state.get("retry_count", 0)
     
-    if retry_count < max_retries:
+    if retry_count < max_retries and state.get("plan"):
         logger.warning(
             f"Report validation failed (length: {len(report) if report else 0}, "
             f"required: {min_length}), retrying (attempt {retry_count + 1}/{max_retries})"

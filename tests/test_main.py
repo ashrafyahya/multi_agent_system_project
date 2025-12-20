@@ -4,14 +4,15 @@ This module contains unit tests for the main entry point to verify
 configuration loading, LLM initialization, workflow creation, and execution.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
+import pytest
 from langchain_groq import ChatGroq
 
 from src.config import Config
 from src.graph.state import WorkflowState
-from src.main import initialize_llm, run_analysis, main
+from src.main import initialize_llm, main, run_analysis
 
 
 class TestInitializeLLM:
@@ -21,7 +22,7 @@ class TestInitializeLLM:
         """Test LLM initialization succeeds."""
         config = Mock(spec=Config)
         config.groq_api_key = "test_api_key"
-        config.groq_model = "llama-3.1-8b-instant"
+        config.llm_model = "llama-3.1-8b-instant"
         
         with patch("src.main.ChatGroq") as mock_chatgroq:
             mock_llm = Mock(spec=ChatGroq)
@@ -40,7 +41,7 @@ class TestInitializeLLM:
         """Test LLM initialization uses config values."""
         config = Mock(spec=Config)
         config.groq_api_key = "custom_api_key"
-        config.groq_model = "custom-model"
+        config.llm_model = "custom-model"
         
         with patch("src.main.ChatGroq") as mock_chatgroq:
             mock_llm = Mock(spec=ChatGroq)
@@ -64,6 +65,8 @@ class TestRunAnalysis:
         
         mock_config = Mock(spec=Config)
         mock_config.max_retries = 3
+        mock_config.agent_log_dir = Path("./data/agent_logs")
+        mock_config.agent_log_enabled = True
         
         mock_llm = Mock(spec=ChatGroq)
         
@@ -105,8 +108,22 @@ class TestRunAnalysis:
         
         mock_config = Mock(spec=Config)
         mock_config.max_retries = 3
+        mock_config.agent_log_dir = Path("./data/agent_logs")
+        mock_config.agent_log_enabled = True
+        mock_config.groq_api_key = "test_key"
+        mock_config.llm_model = "llama-3.1-8b-instant"
+        mock_config.llm_model_planner = None
+        mock_config.llm_model_supervisor = None
+        mock_config.llm_model_insight = None
+        mock_config.llm_model_report = None
+        mock_config.llm_model_collector = None
+        mock_config.llm_model_export = None
+        # Mock the get_model_for_agent method
+        mock_config.get_model_for_agent = Mock(return_value="llama-3.1-8b-instant")
         
         mock_llm = Mock(spec=ChatGroq)
+        mock_agent_llms = {"planner": mock_llm, "supervisor": mock_llm, "insight": mock_llm, 
+                          "report": mock_llm, "collector": mock_llm, "export": mock_llm}
         
         mock_workflow = MagicMock()
         mock_workflow.invoke.return_value = {
@@ -115,7 +132,7 @@ class TestRunAnalysis:
         }
         
         with patch("src.main.get_config", return_value=mock_config) as mock_get_config:
-            with patch("src.main.initialize_llm", return_value=mock_llm):
+            with patch("src.main.initialize_llms_for_agents", return_value=mock_agent_llms):
                 with patch("src.main.create_workflow", return_value=mock_workflow):
                     with patch("src.main.create_initial_state"):
                         run_analysis(user_query)
@@ -128,19 +145,33 @@ class TestRunAnalysis:
         
         mock_config = Mock(spec=Config)
         mock_config.max_retries = 3
+        mock_config.agent_log_dir = Path("./data/agent_logs")
+        mock_config.agent_log_enabled = True
+        mock_config.groq_api_key = "test_key"
+        mock_config.llm_model = "llama-3.1-8b-instant"
+        mock_config.llm_model_planner = None
+        mock_config.llm_model_supervisor = None
+        mock_config.llm_model_insight = None
+        mock_config.llm_model_report = None
+        mock_config.llm_model_collector = None
+        mock_config.llm_model_export = None
+        # Mock the get_model_for_agent method
+        mock_config.get_model_for_agent = Mock(return_value="llama-3.1-8b-instant")
         
         mock_llm = Mock(spec=ChatGroq)
+        mock_agent_llms = {"planner": mock_llm, "supervisor": mock_llm, "insight": mock_llm, 
+                          "report": mock_llm, "collector": mock_llm, "export": mock_llm}
         
         mock_workflow = MagicMock()
         mock_workflow.invoke.return_value = {"report": "Final report"}
         
         with patch("src.main.get_config", return_value=mock_config):
-            with patch("src.main.initialize_llm", return_value=mock_llm) as mock_init_llm:
+            with patch("src.main.initialize_llms_for_agents", return_value=mock_agent_llms) as mock_init_llms:        
                 with patch("src.main.create_workflow", return_value=mock_workflow):
                     with patch("src.main.create_initial_state"):
                         run_analysis(user_query, config=mock_config)
                         
-                        mock_init_llm.assert_called_once_with(mock_config)
+                        mock_init_llms.assert_called_once_with(mock_config)
     
     def test_run_analysis_raises_error_on_empty_query(self) -> None:
         """Test run_analysis raises error on empty query."""
@@ -164,6 +195,8 @@ class TestRunAnalysis:
         
         mock_config = Mock(spec=Config)
         mock_config.max_retries = 3
+        mock_config.agent_log_dir = Path("./data/agent_logs")
+        mock_config.agent_log_enabled = True
         
         with patch("src.main.get_config", return_value=mock_config):
             with patch("src.main.initialize_llm", side_effect=Exception("LLM error")):
@@ -176,6 +209,8 @@ class TestRunAnalysis:
         
         mock_config = Mock(spec=Config)
         mock_config.max_retries = 3
+        mock_config.agent_log_dir = Path("./data/agent_logs")
+        mock_config.agent_log_enabled = True
         
         mock_llm = Mock(spec=ChatGroq)
         
@@ -191,6 +226,8 @@ class TestRunAnalysis:
         
         mock_config = Mock(spec=Config)
         mock_config.max_retries = 3
+        mock_config.agent_log_dir = Path("./data/agent_logs")
+        mock_config.agent_log_enabled = True
         
         mock_llm = Mock(spec=ChatGroq)
         
@@ -210,6 +247,8 @@ class TestRunAnalysis:
         
         mock_config = Mock(spec=Config)
         mock_config.max_retries = 3
+        mock_config.agent_log_dir = Path("./data/agent_logs")
+        mock_config.agent_log_enabled = True
         
         mock_llm = Mock(spec=ChatGroq)
         

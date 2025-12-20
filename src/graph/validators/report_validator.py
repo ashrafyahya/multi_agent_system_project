@@ -52,8 +52,8 @@ class ReportValidator(BaseValidator):
         ```
     """
     
-    MIN_SECTION_LENGTH = 50
-    DEFAULT_MIN_TOTAL_LENGTH = 500
+    MIN_SECTION_LENGTH = 200  # Minimum for executive summary, others require 300
+    DEFAULT_MIN_TOTAL_LENGTH = 1200
     
     REQUIRED_SECTIONS = [
         "executive_summary",
@@ -177,6 +177,14 @@ class ReportValidator(BaseValidator):
         """
         errors: list[str] = []
         
+        # Define section-specific minimum lengths
+        section_min_lengths = {
+            "executive_summary": 200,
+            "swot_breakdown": 300,
+            "competitor_overview": 300,
+            "recommendations": 300,
+        }
+        
         for section in self.REQUIRED_SECTIONS:
             section_content = data.get(section, "")
             
@@ -188,11 +196,12 @@ class ReportValidator(BaseValidator):
                 continue
             
             section_length = len(section_content.strip())
+            min_length = section_min_lengths.get(section, self.MIN_SECTION_LENGTH)
             
-            if section_length < self.MIN_SECTION_LENGTH:
+            if section_length < min_length:
                 errors.append(
                     f"Section '{section}' is too short ({section_length} characters). "
-                    f"Minimum {self.MIN_SECTION_LENGTH} characters required."
+                    f"Minimum {min_length} characters required."
                 )
         
         return errors
@@ -236,10 +245,10 @@ class ReportValidator(BaseValidator):
         summary = summary.strip()
         
         # Check if summary is too short (even if meets minimum)
-        if 50 <= len(summary) < 100:
+        if 200 <= len(summary) < 300:
             warnings.append(
                 "Executive summary is quite short. Consider providing more "
-                "detail for better clarity."
+                "detail for better clarity (recommended 300-500 characters)."
             )
         
         # Check for very repetitive content (simple heuristic)

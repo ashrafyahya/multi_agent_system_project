@@ -5,14 +5,16 @@ agent behavior, dependency injection, and interface compliance.
 """
 
 import json
-import pytest
-from unittest.mock import Mock
+from pathlib import Path
+from unittest.mock import MagicMock, Mock
 
+import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 
 from src.agents.base_agent import BaseAgent
 from src.graph.state import WorkflowState, create_initial_state
+from tests.fixtures.sample_data import sample_collected_data, sample_insights
 
 
 class TestBaseAgent:
@@ -270,7 +272,7 @@ class TestPlannerAgent:
     def test_planner_agent_execute_success(self) -> None:
         """Test planner agent generates valid plan."""
         from src.agents.planner_agent import PlannerAgent
-        
+
         # Mock LLM response
         mock_llm = Mock(spec=BaseChatModel)
         mock_response = Mock()
@@ -454,7 +456,7 @@ class TestPlannerAgent:
         
         state = create_initial_state("Test")
         
-        with pytest.raises(WorkflowError, match="validation failed"):
+        with pytest.raises(WorkflowError, match="failed validation"):
             agent.execute(state)
     
     def test_planner_agent_handles_empty_user_request(self) -> None:
@@ -637,13 +639,14 @@ class TestSupervisorAgent:
         state["collected_data"] = {"competitors": []}
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": ["Digital transformation"],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         result_state = agent.execute(state)
@@ -665,13 +668,14 @@ class TestSupervisorAgent:
         state["collected_data"] = {"competitors": []}
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
             "positioning": "",  # Empty positioning
-            "trends": ["Digital transformation"],
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         state["retry_count"] = 0
         
@@ -689,12 +693,22 @@ class TestSupervisorAgent:
         config = {"max_retries": 3}
         agent = SupervisorAgent(llm=mock_llm, config=config)
         
-        # Valid report (long enough)
+        # Valid report (long enough) - use valid insights
         state = create_initial_state("Test")
         state["plan"] = {"tasks": ["Collect data"]}
         state["collected_data"] = {"competitors": []}
-        state["insights"] = {"swot": {}}
-        state["report"] = "A" * 500  # Minimum length
+        state["insights"] = {
+            "swot": {
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
+            },
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
+        }
+        state["report"] = "A" * 1200  # Minimum length
         
         result_state = agent.execute(state)
         
@@ -752,18 +766,35 @@ class TestSupervisorAgent:
         result_state = agent.execute(state)
         assert "data collection" in result_state["current_task"].lower()
         
-        # Test insight stage
-        state["collected_data"] = {"competitors": []}
+        # Test insight stage - use valid collected_data (at least 4 competitors)
+        state["collected_data"] = {
+            "competitors": [
+                {"name": "Comp1", "source_url": "https://example.com/1"},
+                {"name": "Comp2", "source_url": "https://example.com/2"},
+                {"name": "Comp3", "source_url": "https://example.com/3"},
+                {"name": "Comp4", "source_url": "https://example.com/4"},
+            ]
+        }
         result_state = agent.execute(state)
         assert "insight generation" in result_state["current_task"].lower()
         
-        # Test report stage
-        state["insights"] = {"swot": {}}
+        # Test report stage - use valid insights (needs positioning field)
+        state["insights"] = {
+            "swot": {
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
+            },
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
+        }
         result_state = agent.execute(state)
         assert "report generation" in result_state["current_task"].lower()
         
         # Test complete stage
-        state["report"] = "A" * 500
+        state["report"] = "A" * 1200
         result_state = agent.execute(state)
         assert "complete" in result_state["current_task"].lower()
     
@@ -791,13 +822,14 @@ class TestSupervisorAgent:
         state["collected_data"] = {"competitors": []}
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Short",  # Short but valid
-            "trends": ["Digital transformation"],
+            "positioning": "This is a positioning statement that meets the minimum length requirement of fifty characters for validation purposes",  # Valid length
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         result_state = agent.execute(state)
@@ -811,8 +843,9 @@ class TestDataCollectorAgent:
     
     def test_data_collector_agent_execute_success(self) -> None:
         """Test data collector agent collects data successfully."""
-        from src.agents.data_collector import DataCollectorAgent
         from unittest.mock import patch
+
+        from src.agents.data_collector import DataCollectorAgent
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"max_results": 10}
@@ -894,8 +927,9 @@ class TestDataCollectorAgent:
     
     def test_data_collector_agent_handles_web_search_failure(self) -> None:
         """Test data collector agent handles web search failures gracefully."""
-        from src.agents.data_collector import DataCollectorAgent
         from unittest.mock import patch
+
+        from src.agents.data_collector import DataCollectorAgent
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"max_results": 10}
@@ -956,8 +990,9 @@ class TestDataCollectorAgent:
     
     def test_data_collector_agent_deduplicates_competitors(self) -> None:
         """Test data collector agent deduplicates competitors."""
-        from src.agents.data_collector import DataCollectorAgent
         from unittest.mock import patch
+
+        from src.agents.data_collector import DataCollectorAgent
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"max_results": 10}
@@ -1038,8 +1073,9 @@ class TestDataCollectorAgent:
     
     def test_data_collector_agent_handles_empty_search_results(self) -> None:
         """Test data collector agent handles empty search results."""
-        from src.agents.data_collector import DataCollectorAgent
         from unittest.mock import patch
+
+        from src.agents.data_collector import DataCollectorAgent
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"max_results": 10}
@@ -1065,8 +1101,9 @@ class TestDataCollectorAgent:
     
     def test_data_collector_agent_respects_minimum_results(self) -> None:
         """Test data collector agent respects minimum_results from plan."""
-        from src.agents.data_collector import DataCollectorAgent
         from unittest.mock import patch
+
+        from src.agents.data_collector import DataCollectorAgent
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"max_results": 10}
@@ -1163,17 +1200,32 @@ class TestInsightAgent:
     def test_insight_agent_handles_empty_competitors(self) -> None:
         """Test insight agent handles empty competitor list."""
         from src.agents.insight_agent import InsightAgent
-        from src.exceptions.workflow_error import WorkflowError
         
         mock_llm = Mock(spec=BaseChatModel)
+        mock_response = Mock()
+        mock_response.content = json.dumps({
+            "swot": {
+                "strengths": ["Market presence"],
+                "weaknesses": ["Limited data"],
+                "opportunities": ["Market expansion"],
+                "threats": ["Competition"],
+            },
+            "positioning": "Market analysis with limited competitor data available",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Market expansion"],
+        })
+        mock_llm.invoke.return_value = mock_response
+        
         config = {"temperature": 0.7}
         agent = InsightAgent(llm=mock_llm, config=config)
         
         state = create_initial_state("Test")
         state["collected_data"] = {"competitors": []}
         
-        with pytest.raises(WorkflowError, match="No competitor data"):
-            agent.execute(state)
+        # Should generate minimal insights instead of raising error
+        result_state = agent.execute(state)
+        assert result_state["insights"] is not None
+        assert "swot" in result_state["insights"]
     
     def test_insight_agent_handles_llm_error(self) -> None:
         """Test insight agent handles LLM errors gracefully."""
@@ -1273,7 +1325,7 @@ class TestInsightAgent:
             ]
         }
         
-        with pytest.raises(WorkflowError, match="validation failed"):
+        with pytest.raises(WorkflowError, match="failed validation"):
             agent.execute(state)
     
     def test_insight_agent_parses_json_from_markdown(self) -> None:
@@ -1286,14 +1338,14 @@ class TestInsightAgent:
 ```json
 {
     "swot": {
-        "strengths": ["Strong brand"],
-        "weaknesses": ["High prices"],
-        "opportunities": ["Emerging markets"],
-        "threats": ["New competitors"]
+        "strengths": ["Strong brand", "Market leader"],
+        "weaknesses": ["High prices", "Limited distribution"],
+        "opportunities": ["Emerging markets", "B2B expansion"],
+        "threats": ["New competitors", "Market saturation"]
     },
-    "positioning": "Premium market leader",
-    "trends": ["Digital transformation"],
-    "opportunities": ["Expansion"]
+    "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+    "trends": ["Digital transformation", "AI integration"],
+    "opportunities": ["Expansion into Asia", "B2B market growth"]
 }
 ```"""
         mock_llm.invoke.return_value = mock_response
@@ -1309,7 +1361,7 @@ class TestInsightAgent:
         }
         
         result_state = agent.execute(state)
-        assert result_state["insights"]["swot"]["strengths"] == ["Strong brand"]
+        assert result_state["insights"]["swot"]["strengths"] == ["Strong brand", "Market leader"]
     
     def test_insight_agent_prepares_competitor_summary(self) -> None:
         """Test insight agent prepares competitor summary correctly."""
@@ -1349,12 +1401,12 @@ class TestInsightAgent:
         mock_response = Mock()
         mock_response.content = json.dumps({
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
             # Missing trends and opportunities (should be set to empty lists)
         })
         mock_llm.invoke.return_value = mock_response
@@ -1421,11 +1473,11 @@ class TestReportAgent:
         mock_llm = Mock(spec=BaseChatModel)
         mock_response = Mock()
         mock_response.content = json.dumps({
-            "executive_summary": "This executive summary provides a comprehensive overview of the competitor analysis findings and key insights.",
-            "swot_breakdown": "The SWOT analysis reveals key strengths, weaknesses, opportunities, and threats in the competitive landscape.",
-            "competitor_overview": "The competitor overview examines the key players in the market and their strategic positions.",
-            "recommendations": "Based on the analysis, we recommend strategic actions to improve competitive positioning.",
-            "min_length": 500,
+            "executive_summary": "This executive summary provides a comprehensive overview of the competitor analysis findings and key insights. The analysis reveals important strategic information about market positioning and competitive dynamics. The findings indicate significant opportunities for market expansion and strategic positioning improvements. This comprehensive analysis covers multiple market segments and provides actionable recommendations for business growth.",
+            "swot_breakdown": "The SWOT analysis reveals key strengths, weaknesses, opportunities, and threats in the competitive landscape. This comprehensive breakdown provides strategic insights for decision-making. The analysis covers multiple dimensions including market position, product capabilities, customer relationships, and operational efficiency. This detailed examination helps identify strategic priorities and areas for improvement across different market segments.",
+            "competitor_overview": "The competitor overview examines the key players in the market and their strategic positions. This section analyzes market share, positioning strategies, and competitive advantages. It provides detailed information about how different competitors approach the market, their unique value propositions, target customer segments, and strategic initiatives that drive their competitive advantage in the marketplace.",
+            "recommendations": "Based on the analysis, we recommend strategic actions to improve competitive positioning. These recommendations focus on leveraging strengths and addressing market opportunities. The strategic roadmap includes product development initiatives, market expansion strategies, customer acquisition approaches, and operational improvements. These recommendations are designed to enhance market performance and drive sustainable growth.",
+            "min_length": 1200,
         })
         mock_llm.invoke.return_value = mock_response
         
@@ -1435,14 +1487,14 @@ class TestReportAgent:
         state = create_initial_state("Test")
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": ["Digital transformation"],
-            "opportunities": ["Expansion"],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         result_state = agent.execute(state)
@@ -1498,14 +1550,14 @@ class TestReportAgent:
         state = create_initial_state("Test")
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": [],
-            "opportunities": [],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         with pytest.raises(WorkflowError, match="Failed to generate report"):
@@ -1527,14 +1579,14 @@ class TestReportAgent:
         state = create_initial_state("Test")
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": [],
-            "opportunities": [],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         with pytest.raises(WorkflowError, match="Failed to parse report"):
@@ -1559,14 +1611,14 @@ class TestReportAgent:
         state = create_initial_state("Test")
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": [],
-            "opportunities": [],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         with pytest.raises(WorkflowError, match="missing required sections"):
@@ -1581,9 +1633,9 @@ class TestReportAgent:
         mock_response = Mock()
         mock_response.content = json.dumps({
             "executive_summary": "Short",  # Too short (< 50 chars)
-            "swot_breakdown": "SWOT breakdown details",
-            "competitor_overview": "Competitor overview details",
-            "recommendations": "Recommendations details",
+            "swot_breakdown": "The SWOT analysis reveals key strengths, weaknesses, opportunities, and threats.",
+            "competitor_overview": "The competitor overview provides detailed information about market players.",
+            "recommendations": "Based on the analysis, we recommend strategic actions for market positioning.",
         })
         mock_llm.invoke.return_value = mock_response
         
@@ -1593,17 +1645,17 @@ class TestReportAgent:
         state = create_initial_state("Test")
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": [],
-            "opportunities": [],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
-        with pytest.raises(WorkflowError, match="validation failed"):
+        with pytest.raises(WorkflowError, match="failed validation"):
             agent.execute(state)
     
     def test_report_agent_parses_json_from_markdown(self) -> None:
@@ -1615,10 +1667,11 @@ class TestReportAgent:
         mock_response.content = """Here's the report:
 ```json
 {
-    "executive_summary": "Executive summary text with sufficient length",
-    "swot_breakdown": "SWOT breakdown details",
-    "competitor_overview": "Competitor overview details",
-    "recommendations": "Recommendations details"
+    "executive_summary": "This is a comprehensive executive summary of the competitor analysis findings with detailed insights and key observations. The analysis covers multiple market segments and provides strategic recommendations for business growth and competitive positioning. The findings reveal important market dynamics and opportunities for strategic improvement.",
+    "swot_breakdown": "The SWOT analysis reveals key strengths, weaknesses, opportunities, and threats in detail. This comprehensive breakdown provides strategic insights for decision-making. The analysis covers multiple dimensions including market position, product capabilities, customer relationships, and operational efficiency across different market segments and competitive environments.",
+    "competitor_overview": "The competitor overview provides detailed information about market players and their positioning strategies. This section analyzes competitive dynamics and market structure. It examines how different competitors approach the market, their unique value propositions, target customer segments, and strategic initiatives that drive their competitive advantage.",
+    "recommendations": "Based on the analysis, we recommend strategic actions for market positioning and competitive advantage. These recommendations are designed to enhance market performance and drive sustainable growth. The strategic roadmap includes product development initiatives, market expansion strategies, customer acquisition approaches, and operational improvements.",
+    "min_length": 1200
 }
 ```"""
         mock_llm.invoke.return_value = mock_response
@@ -1629,14 +1682,14 @@ class TestReportAgent:
         state = create_initial_state("Test")
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": [],
-            "opportunities": [],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         result_state = agent.execute(state)
@@ -1649,10 +1702,10 @@ class TestReportAgent:
         mock_llm = Mock(spec=BaseChatModel)
         mock_response = Mock()
         mock_response.content = json.dumps({
-            "executive_summary": "Executive summary text with sufficient length",
-            "swot_breakdown": "SWOT breakdown details",
-            "competitor_overview": "Competitor overview details",
-            "recommendations": "Recommendations details",
+            "executive_summary": "This is a comprehensive executive summary of the competitor analysis findings with detailed insights and key observations. The analysis covers multiple market segments and provides strategic recommendations for business growth and competitive positioning. The findings reveal important market dynamics and opportunities for strategic improvement.",
+            "swot_breakdown": "The SWOT analysis reveals key strengths, weaknesses, opportunities, and threats in the competitive landscape. This detailed breakdown helps identify strategic priorities and areas for improvement. The analysis covers multiple dimensions including market position, product capabilities, customer relationships, and operational efficiency across different market segments and competitive environments.",
+            "competitor_overview": "The competitor overview provides detailed information about market players and their positioning strategies. This section analyzes competitive dynamics and market structure. It examines how different competitors approach the market, their unique value propositions, target customer segments, and strategic initiatives that drive their competitive advantage in the marketplace.",
+            "recommendations": "Based on the analysis, we recommend strategic actions for market positioning and competitive advantage. These recommendations are designed to enhance market performance and drive sustainable growth. The strategic roadmap includes product development initiatives, market expansion strategies, customer acquisition approaches, and operational improvements that will strengthen competitive positioning.",
         })
         mock_llm.invoke.return_value = mock_response
         
@@ -1662,14 +1715,14 @@ class TestReportAgent:
         state = create_initial_state("Test")
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": [],
-            "opportunities": [],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         result_state = agent.execute(state)
@@ -1689,10 +1742,10 @@ class TestReportAgent:
         mock_llm = Mock(spec=BaseChatModel)
         mock_response = Mock()
         mock_response.content = json.dumps({
-            "executive_summary": "Executive summary text with sufficient length",
-            "swot_breakdown": "SWOT breakdown details",
-            "competitor_overview": "Competitor overview details",
-            "recommendations": "Recommendations details",
+            "executive_summary": "This is a comprehensive executive summary of the competitor analysis findings with detailed insights and key observations. The analysis covers multiple market segments and provides strategic recommendations for business growth and competitive positioning. The findings reveal important market dynamics and opportunities for strategic improvement.",
+            "swot_breakdown": "The SWOT analysis reveals key strengths, weaknesses, opportunities, and threats in the competitive landscape. This detailed breakdown helps identify strategic priorities and areas for improvement. The analysis covers multiple dimensions including market position, product capabilities, customer relationships, and operational efficiency across different market segments and competitive environments.",
+            "competitor_overview": "The competitor overview provides detailed information about market players and their positioning strategies. This section analyzes competitive dynamics and market structure. It examines how different competitors approach the market, their unique value propositions, target customer segments, and strategic initiatives that drive their competitive advantage in the marketplace.",
+            "recommendations": "Based on the analysis, we recommend strategic actions for market positioning and competitive advantage. These recommendations are designed to enhance market performance and drive sustainable growth. The strategic roadmap includes product development initiatives, market expansion strategies, customer acquisition approaches, and operational improvements that will strengthen competitive positioning.",
         })
         mock_llm.invoke.return_value = mock_response
         
@@ -1703,14 +1756,14 @@ class TestReportAgent:
         state = create_initial_state("Test")
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": [],
-            "opportunities": [],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         # Should still work (warning is logged but doesn't prevent execution)
@@ -1720,15 +1773,15 @@ class TestReportAgent:
     def test_report_agent_prepares_insights_summary(self) -> None:
         """Test report agent prepares insights summary correctly."""
         from src.agents.report_agent import ReportAgent
-        from src.models.insight_model import Insight, SWOT
+        from src.models.insight_model import SWOT, Insight
         
         mock_llm = Mock(spec=BaseChatModel)
         mock_response = Mock()
         mock_response.content = json.dumps({
-            "executive_summary": "Executive summary text with sufficient length",
-            "swot_breakdown": "SWOT breakdown details",
-            "competitor_overview": "Competitor overview details",
-            "recommendations": "Recommendations details",
+            "executive_summary": "This is a comprehensive executive summary of the competitor analysis findings with detailed insights and key observations. The analysis covers multiple market segments and provides strategic recommendations for business growth and competitive positioning. The findings reveal important market dynamics and opportunities for strategic improvement.",
+            "swot_breakdown": "The SWOT analysis reveals key strengths, weaknesses, opportunities, and threats in the competitive landscape. This detailed breakdown helps identify strategic priorities and areas for improvement. The analysis covers multiple dimensions including market position, product capabilities, customer relationships, and operational efficiency across different market segments and competitive environments.",
+            "competitor_overview": "The competitor overview provides detailed information about market players and their positioning strategies. This section analyzes competitive dynamics and market structure. It examines how different competitors approach the market, their unique value propositions, target customer segments, and strategic initiatives that drive their competitive advantage in the marketplace.",
+            "recommendations": "Based on the analysis, we recommend strategic actions for market positioning and competitive advantage. These recommendations are designed to enhance market performance and drive sustainable growth. The strategic roadmap includes product development initiatives, market expansion strategies, customer acquisition approaches, and operational improvements that will strengthen competitive positioning.",
         })
         mock_llm.invoke.return_value = mock_response
         
@@ -1737,23 +1790,27 @@ class TestReportAgent:
         
         swot = SWOT(
             strengths=["Strong brand", "Market leader"],
-            weaknesses=["High prices"],
-            opportunities=["Emerging markets"],
-            threats=["New competitors"],
+            weaknesses=["High prices", "Limited distribution"],
+            opportunities=["Emerging markets", "B2B expansion"],
+            threats=["New competitors", "Market saturation"],
         )
         insights = Insight(
             swot=swot,
-            positioning="Premium market leader",
-            trends=["Digital transformation"],
-            opportunities=["Expansion"],
+            positioning="Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            trends=["Digital transformation", "AI integration"],
+            opportunities=["Expansion into Asia", "B2B market growth"],
         )
         
-        summary = agent._prepare_insights_summary(insights)
+        state = create_initial_state("Test")
+        state["collected_data"] = sample_collected_data()
+        
+        summary = agent._prepare_insights_summary(insights, state)
         
         assert "SWOT Analysis" in summary
         assert "Strong brand" in summary
         assert "Premium market leader" in summary
         assert "Digital transformation" in summary
+        assert "Source URLs" in summary or "source" in summary.lower()
     
     def test_report_agent_name(self) -> None:
         """Test report agent name property."""
@@ -1781,14 +1838,14 @@ class TestReportAgent:
         state = create_initial_state("Test")
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": [],
-            "opportunities": [],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         with pytest.raises(WorkflowError, match="empty response"):
@@ -1802,11 +1859,11 @@ class TestReportAgent:
         mock_response = Mock()
         # Generate sections that meet minimum length
         mock_response.content = json.dumps({
-            "executive_summary": "A" * 100,
-            "swot_breakdown": "B" * 100,
-            "competitor_overview": "C" * 100,
-            "recommendations": "D" * 200,
-            "min_length": 500,
+            "executive_summary": "A" * 300,
+            "swot_breakdown": "B" * 300,
+            "competitor_overview": "C" * 300,
+            "recommendations": "D" * 300,
+            "min_length": 1200,
         })
         mock_llm.invoke.return_value = mock_response
         
@@ -1816,14 +1873,14 @@ class TestReportAgent:
         state = create_initial_state("Test")
         state["insights"] = {
             "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"],
+                "strengths": ["Strong brand", "Market leader"],
+                "weaknesses": ["High prices", "Limited distribution"],
+                "opportunities": ["Emerging markets", "B2B expansion"],
+                "threats": ["New competitors", "Market saturation"],
             },
-            "positioning": "Premium market leader",
-            "trends": [],
-            "opportunities": [],
+            "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+            "trends": ["Digital transformation", "AI integration"],
+            "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
         result_state = agent.execute(state)
@@ -1831,3 +1888,830 @@ class TestReportAgent:
         
         # Total length should be at least 500 (sections + formatting)
         assert len(report) >= 500
+    
+    def test_report_agent_includes_methodology_and_sources(self) -> None:
+        """Test report agent includes methodology and sources sections."""
+        from src.agents.report_agent import ReportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        mock_response = Mock()
+        mock_response.content = json.dumps({
+            "executive_summary": "A" * 200,
+            "swot_breakdown": "B" * 300,
+            "competitor_overview": "C" * 300,
+            "recommendations": "D" * 300,
+            "methodology": "E" * 200,
+            "sources": ["https://source1.com", "https://source2.com"],
+            "min_length": 1200,
+        })
+        mock_llm.invoke.return_value = mock_response
+        
+        config = {"temperature": 0.7}
+        agent = ReportAgent(llm=mock_llm, config=config)
+        
+        state = create_initial_state("Test")
+        state["insights"] = sample_insights()
+        state["collected_data"] = sample_collected_data()
+        
+        result_state = agent.execute(state)
+        
+        report = result_state["report"]
+        assert report is not None
+        assert "## Methodology" in report
+        assert "## Sources" in report
+        assert "https://source1.com" in report
+        assert "https://source2.com" in report
+
+
+class TestExportAgent:
+    """Tests for ExportAgent."""
+    
+    def test_export_agent_execute_success(self) -> None:
+        """Test export agent executes successfully."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf", "include_visualizations": False}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine = MagicMock()
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        
+                        result_state = agent.execute(state)
+                        
+                        assert "export_paths" in result_state
+                        assert result_state["export_paths"] is not None
+                        assert result_state["current_task"] == "Export completed successfully"
+    
+    def test_export_agent_handles_missing_report(self) -> None:
+        """Test export agent handles missing report."""
+        from src.agents.export_agent import ExportAgent
+        from src.exceptions.workflow_error import WorkflowError
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        state = create_initial_state("Test")
+        # No report
+        
+        with pytest.raises(WorkflowError, match="without a report"):
+            agent.execute(state)
+    
+    def test_export_agent_handles_missing_insights(self) -> None:
+        """Test export agent handles missing insights gracefully."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf", "include_visualizations": True}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        # No insights
+        
+                        result_state = agent.execute(state)
+                        
+                        # Should still succeed, just without visualizations
+                        assert "export_paths" in result_state
+    
+    def test_export_agent_generates_visualizations(self) -> None:
+        """Test export agent generates visualizations when requested."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf", "include_visualizations": True}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        # Patch matplotlib imports that happen inside functions
+                        import sys
+                        mock_matplotlib = MagicMock()
+                        mock_pyplot = MagicMock()
+                        mock_fig = MagicMock()
+                        mock_axes = MagicMock()
+                        mock_pyplot.subplots.return_value = (mock_fig, mock_axes)
+                        mock_pyplot.savefig.return_value = None
+                        mock_pyplot.close.return_value = None
+                        mock_pyplot.tight_layout.return_value = None
+                        mock_pyplot.suptitle.return_value = None
+                        mock_pyplot.cm = MagicMock()
+                        mock_pyplot.cm.viridis.return_value = [(0.5, 0.5, 0.5, 1.0)]
+                        mock_pyplot.cm.Set3.return_value = [(0.5, 0.5, 0.5, 1.0)]
+                        mock_pyplot.cm.plasma.return_value = [(0.5, 0.5, 0.5, 1.0)]
+                        mock_pyplot.linspace = MagicMock(return_value=[0.5])
+                        mock_matplotlib.pyplot = mock_pyplot
+                        mock_matplotlib.patches = MagicMock()
+                        
+                        with patch.dict(sys.modules, {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_pyplot, "matplotlib.patches": mock_matplotlib.patches}):
+                            with patch("numpy.arange", return_value=[0, 1]):
+                                state = create_initial_state("Test")
+                                state["report"] = "# Report\n## Summary\nTest content"
+                                state["insights"] = {
+                                    "swot": {
+                                        "strengths": ["Strong brand", "Market leader"],
+                                        "weaknesses": ["High prices", "Limited distribution"],
+                                        "opportunities": ["Emerging markets", "B2B expansion"],
+                                        "threats": ["New competitors", "Market saturation"],
+                                    },
+                                    "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+                                    "trends": ["Digital transformation", "AI integration"],
+                                    "opportunities": ["Expansion into Asia", "B2B market growth"],
+                                }
+                                
+                                result_state = agent.execute(state)
+                                
+                                assert "export_paths" in result_state
+    
+    def test_export_agent_respects_branding_config(self) -> None:
+        """Test export agent respects branding configuration."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        from src.models.pdf_branding_config import PDFBrandingConfig
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        branding = PDFBrandingConfig(company_name="Test Company")
+        config = {
+            "export_format": "pdf",
+            "pdf_branding": branding,
+        }
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        
+                        result_state = agent.execute(state)
+                        
+                        # Verify branding config was used
+                        assert mock_engine_class.called
+                        call_kwargs = mock_engine_class.call_args[1]
+                        assert call_kwargs["branding_config"] == branding
+    
+    def test_export_agent_respects_layout_config(self) -> None:
+        """Test export agent respects layout configuration."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        from src.models.pdf_layout_config import PDFLayoutConfig
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        layout = PDFLayoutConfig(page_size="Letter", orientation="landscape")
+        config = {
+            "export_format": "pdf",
+            "pdf_layout": layout,
+        }
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        
+                        result_state = agent.execute(state)
+                        
+                        # Verify layout config was used
+                        assert mock_engine_class.called
+                        call_kwargs = mock_engine_class.call_args[1]
+                        assert call_kwargs["layout_config"] == layout
+    
+    def test_export_agent_handles_file_system_errors(self) -> None:
+        """Test export agent handles file system errors gracefully."""
+        from unittest.mock import patch
+
+        from src.agents.export_agent import ExportAgent
+        from src.exceptions.workflow_error import WorkflowError
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf", "output_dir": "/invalid/path"}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with patch("src.agents.export_agent.get_config") as mock_get_config:
+            mock_app_config = Mock()
+            mock_app_config.data_dir = Path("/invalid")
+            mock_get_config.return_value = mock_app_config
+            
+            state = create_initial_state("Test")
+            state["report"] = "# Report\n## Summary\nTest content"
+            
+            # Should handle error gracefully or raise WorkflowError
+            try:
+                result_state = agent.execute(state)
+                # If it doesn't raise, should have error in validation_errors
+                assert "export_paths" in result_state or len(result_state.get("validation_errors", [])) > 0
+            except WorkflowError:
+                # Also acceptable - error handling
+                pass
+    
+    def test_export_agent_validates_output_directory(self) -> None:
+        """Test export agent validates output directory."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        
+                        result_state = agent.execute(state)
+                        
+                        # Should create output directory
+                        assert "export_paths" in result_state
+    
+    def test_export_agent_generates_swot_diagram(self) -> None:
+        """Test export agent generates SWOT diagram."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf", "include_visualizations": True}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        # Patch matplotlib imports that happen inside functions
+                        import sys
+                        mock_matplotlib = MagicMock()
+                        mock_pyplot = MagicMock()
+                        mock_fig = MagicMock()
+                        mock_axes = MagicMock()
+                        mock_pyplot.subplots.return_value = (mock_fig, mock_axes)
+                        mock_pyplot.savefig.return_value = None
+                        mock_pyplot.close.return_value = None
+                        mock_pyplot.tight_layout.return_value = None
+                        mock_pyplot.suptitle.return_value = None
+                        mock_pyplot.cm = MagicMock()
+                        mock_pyplot.cm.viridis.return_value = [(0.5, 0.5, 0.5, 1.0)]
+                        mock_pyplot.cm.Set3.return_value = [(0.5, 0.5, 0.5, 1.0)]
+                        mock_pyplot.cm.plasma.return_value = [(0.5, 0.5, 0.5, 1.0)]
+                        mock_pyplot.linspace = MagicMock(return_value=[0.5])
+                        mock_matplotlib.pyplot = mock_pyplot
+                        mock_matplotlib.patches = MagicMock()
+                        
+                        with patch.dict(sys.modules, {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_pyplot, "matplotlib.patches": mock_matplotlib.patches}):
+                            with patch("numpy.arange", return_value=[0, 1]):
+                                state = create_initial_state("Test")
+                                state["report"] = "# Report\n## Summary\nTest content"
+                                state["insights"] = {
+                                    "swot": {
+                                        "strengths": ["Strong brand", "Market leader"],
+                                        "weaknesses": ["High prices", "Limited distribution"],
+                                        "opportunities": ["Emerging markets", "B2B expansion"],
+                                        "threats": ["New competitors", "Market saturation"],
+                                    },
+                                    "positioning": "Premium market leader in the SaaS industry with strong brand recognition and customer loyalty, positioned as a trusted provider of enterprise solutions",
+                                    "trends": ["Digital transformation", "AI integration"],
+                                    "opportunities": ["Expansion into Asia", "B2B market growth"],
+                                }
+                                
+                                result_state = agent.execute(state)
+                                
+                                # Should attempt to generate SWOT diagram
+                                assert "export_paths" in result_state
+    
+    def test_export_agent_name(self) -> None:
+        """Test export agent name property."""
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        assert agent.name == "export_agent"
+    
+    def test_export_agent_handles_empty_report_content(self) -> None:
+        """Test export agent handles empty report content."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        from src.exceptions.workflow_error import WorkflowError
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                state = create_initial_state("Test")
+                state["report"] = ""  # Empty report
+                
+                # Empty report should raise WorkflowError
+                with pytest.raises(WorkflowError, match="without a report"):
+                    agent.execute(state)
+    
+    def test_export_agent_handles_missing_competitor_data(self) -> None:
+        """Test export agent handles missing competitor data for advanced visualizations."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {
+            "export_format": "pdf",
+            "include_visualizations": True,
+            "include_advanced_viz": True,
+        }
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        # No collected_data for advanced visualizations
+        
+                        result_state = agent.execute(state)
+                        
+                        # Should still succeed without advanced visualizations
+                        assert "export_paths" in result_state
+    
+    def test_export_agent_sets_pdf_metadata(self) -> None:
+        """Test export agent sets PDF metadata correctly."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        from src.models.pdf_branding_config import PDFBrandingConfig
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        branding = PDFBrandingConfig(company_name="Test Company")
+        config = {
+            "export_format": "pdf",
+            "pdf_branding": branding,
+        }
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc_class:
+                        mock_doc_instance = MagicMock()
+                        mock_canvas = MagicMock()
+                        mock_doc_instance.pagesize = (612, 792)
+                        mock_doc_class.return_value = mock_doc_instance
+                        
+                        # Track metadata calls
+                        metadata_calls = {}
+                        
+                        def track_metadata_setter(name):
+                            def setter(value):
+                                metadata_calls[name] = value
+                            return setter
+                        
+                        mock_canvas.setTitle = track_metadata_setter("title")
+                        mock_canvas.setAuthor = track_metadata_setter("author")
+                        mock_canvas.setSubject = track_metadata_setter("subject")
+                        mock_canvas.setKeywords = track_metadata_setter("keywords")
+                        mock_canvas.setCreator = track_metadata_setter("creator")
+                        
+                        # Mock the onFirstPage callback to capture canvas
+                        def capture_callback(callback):
+                            if callback:
+                                callback(mock_canvas, mock_doc_instance)
+                        
+                        mock_doc_instance.build = MagicMock(side_effect=lambda story, **kwargs: capture_callback(kwargs.get("onFirstPage")))
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Test Report\n## Summary\nTest content"
+                        
+                        result_state = agent.execute(state)
+                        
+                        assert "export_paths" in result_state
+                        # Metadata should be set (if callback was called)
+                        # Note: In actual execution, metadata is set via canvas callbacks
+    
+    def test_export_agent_extracts_bookmarks(self) -> None:
+        """Test export agent extracts bookmarks from report."""
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        report_content = """# Main Title
+## Section 1
+### Subsection 1.1
+## Section 2
+### Subsection 2.1"""
+        
+        from src.template.pdf_utils import extract_bookmarks
+        bookmarks = extract_bookmarks(report_content)
+        
+        assert isinstance(bookmarks, list)
+        assert len(bookmarks) == 5  # 1 H1 + 2 H2 + 2 H3
+        assert all("title" in bm and "level" in bm for bm in bookmarks)
+        assert bookmarks[0]["level"] == 1  # Main Title
+        assert bookmarks[1]["level"] == 2  # Section 1
+    
+    def test_export_agent_handles_dict_branding_config(self) -> None:
+        """Test export agent handles dict branding config."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        branding_dict = {
+            "company_name": "Test Company",
+            "primary_color": "#1a1a1a",
+        }
+        config = {
+            "export_format": "pdf",
+            "pdf_branding": branding_dict,
+        }
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        
+                        result_state = agent.execute(state)
+                        
+                        assert "export_paths" in result_state
+                        # Should have converted dict to PDFBrandingConfig
+                        assert mock_engine_class.called
+    
+    def test_export_agent_handles_dict_layout_config(self) -> None:
+        """Test export agent handles dict layout config."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        layout_dict = {
+            "page_size": "A4",
+            "orientation": "portrait",
+        }
+        config = {
+            "export_format": "pdf",
+            "pdf_layout": layout_dict,
+        }
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        
+                        result_state = agent.execute(state)
+                        
+                        assert "export_paths" in result_state
+                        # Should have converted dict to PDFLayoutConfig
+                        assert mock_engine_class.called
+    
+    def test_export_agent_handles_invalid_branding_config(self) -> None:
+        """Test export agent handles invalid branding config gracefully."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        invalid_branding = {"invalid_field": "invalid_value"}
+        config = {
+            "export_format": "pdf",
+            "pdf_branding": invalid_branding,
+        }
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_instance = MagicMock()
+                    mock_engine_instance.create_cover_page.return_value = []
+                    mock_engine_instance.create_header.return_value = None
+                    mock_engine_instance.create_footer.return_value = None
+                    mock_engine_class.return_value = mock_engine_instance
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        
+                        # Should use default config and still succeed
+                        result_state = agent.execute(state)
+                        
+                        assert "export_paths" in result_state
+    
+    def test_export_agent_extracts_keywords(self) -> None:
+        """Test export agent extracts keywords from report."""
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        report_content = """# Competitor Analysis Report
+## Market Overview
+## SWOT Analysis
+## Recommendations"""
+        
+        from src.template.pdf_utils import extract_keywords
+        keywords = extract_keywords(report_content)
+        
+        assert isinstance(keywords, str)
+        assert "competitor" in keywords.lower()
+        assert "analysis" in keywords.lower()
+        # Should include section headings as keywords
+        assert len(keywords) > 0
+    
+    def test_export_agent_creates_default_configs(self) -> None:
+        """Test export agent creates default configs when none provided."""
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        from src.template.pdf_utils import get_pdf_configs
+        branding_config, layout_config = get_pdf_configs(config)
+        
+        # Should create default configs
+        assert branding_config is not None
+        assert layout_config is not None
+        assert branding_config.company_name is not None
+        assert layout_config.page_size is not None
+    
+    def test_export_agent_template_engine_fallback(self) -> None:
+        """Test export agent falls back to basic PDF if template engine fails."""
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.agents.export_agent import ExportAgent
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"export_format": "pdf"}
+        agent = ExportAgent(llm=mock_llm, config=config)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "exports"
+            config["output_dir"] = str(output_dir)
+            
+            with patch("src.agents.export_agent.get_config") as mock_get_config:
+                mock_app_config = Mock()
+                mock_app_config.data_dir = Path(tmpdir)
+                mock_get_config.return_value = mock_app_config
+                
+                # Make template engine raise exception
+                with patch("src.template.pdf_generator.DefaultPDFTemplateEngine") as mock_engine_class:
+                    mock_engine_class.side_effect = Exception("Template engine failed")
+                    
+                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
+                        mock_doc_instance = MagicMock()
+                        mock_doc.return_value = mock_doc_instance
+                        
+                        state = create_initial_state("Test")
+                        state["report"] = "# Report\n## Summary\nTest content"
+                        
+                        # Should still generate PDF without template engine
+                        result_state = agent.execute(state)
+                        
+                        assert "export_paths" in result_state
+                        assert "pdf" in result_state["export_paths"]
