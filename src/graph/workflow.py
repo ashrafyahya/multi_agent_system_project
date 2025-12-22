@@ -2,25 +2,6 @@
 
 This module builds the complete StateGraph with all nodes, conditional edges,
 validation gates, and retry logic.
-
-Example:
-    ```python
-    from src.graph.workflow import create_workflow
-    from langchain_groq import ChatGroq
-    from src.graph.state import create_initial_state
-    
-    from src.config import get_config
-    from src.main import initialize_llms_for_agents
-    
-    config = get_config()
-    agent_llms = initialize_llms_for_agents(config)
-    workflow_config = {"max_retries": 3, "agent_llms": agent_llms}
-    workflow = create_workflow(llm=agent_llms["planner"], config=workflow_config)
-    
-    state = create_initial_state("Analyze competitors in SaaS market")
-    result = workflow.invoke(state)
-    print(result["report"])
-    ```
 """
 
 import logging
@@ -29,6 +10,7 @@ from typing import Any, Literal
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, StateGraph
 
+from src.config import get_config
 from src.graph.nodes.data_collector_node import create_data_collector_node
 from src.graph.nodes.export_node import create_export_node
 from src.graph.nodes.insight_node import create_insight_node
@@ -37,6 +19,7 @@ from src.graph.nodes.report_node import create_report_node
 from src.graph.nodes.retry_node import create_retry_node
 from src.graph.nodes.supervisor_node import create_supervisor_node
 from src.graph.state import WorkflowState
+from src.graph.state_utils import update_state
 from src.graph.validators.collector_validator import CollectorValidator
 from src.graph.validators.data_consistency_validator import \
     DataConsistencyValidator
@@ -79,26 +62,6 @@ def create_workflow(
     
     Returns:
         Compiled StateGraph ready for execution
-    
-    Example:
-        ```python
-        from langchain_groq import ChatGroq
-        from src.graph.workflow import create_workflow
-        from src.graph.state import create_initial_state
-        from src.config import get_config
-        from src.main import initialize_llms_for_agents
-        
-        config = get_config()
-        agent_llms = initialize_llms_for_agents(config)
-        workflow_config = {
-            "max_retries": 3,
-            "agent_llms": agent_llms
-        }
-        workflow = create_workflow(llm=agent_llms["planner"], config=workflow_config)
-        
-        state = create_initial_state("Analyze competitors")
-        result = workflow.invoke(state)
-        ```
     """
     # Extract configuration
     max_retries = config.get("max_retries", 3)
@@ -142,7 +105,8 @@ def create_workflow(
     insight_node_func = create_insight_node(llm=insight_llm, config=insight_config, agent_logger=agent_logger)
     report_node_func = create_report_node(llm=report_llm, config=report_config, agent_logger=agent_logger)
     export_node_func = create_export_node(llm=export_llm, config=export_config, agent_logger=agent_logger)
-    retry_node_func = create_retry_node(max_retries=max_retries)
+    # Use planner LLM for intelligent retry (can analyze errors and improve queries)
+    retry_node_func = create_retry_node(max_retries=max_retries, llm=planner_llm)
     
     # Build graph
     graph = StateGraph(WorkflowState)
@@ -152,6 +116,7 @@ def create_workflow(
     graph.add_node("supervisor", supervisor_node_func)
     graph.add_node("collector", collector_node_func)
     graph.add_node("insight", insight_node_func)
+    graph.add_node("store_warnings", lambda state: _store_validation_warnings(state))
     graph.add_node("report", report_node_func)
     graph.add_node("export", export_node_func)
     graph.add_node("retry", retry_node_func)
@@ -188,16 +153,19 @@ def create_workflow(
         }
     )
     
-    # insight -> validate -> report or retry or END
+    # insight -> validate -> store_warnings or retry or END
     graph.add_conditional_edges(
         "insight",
         lambda state: _validate_insight_output(state, max_retries),
         {
-            "report": "report",
+            "store_warnings": "store_warnings",
             "retry": "retry",
             END: END,
         }
     )
+    
+    # store_warnings -> report (stores validation warnings immutably)
+    graph.add_edge("store_warnings", "report")
     
     # report -> validate -> export or retry or END
     graph.add_conditional_edges(
@@ -328,18 +296,20 @@ def _validate_collector_output(
 def _validate_insight_output(
     state: WorkflowState,
     max_retries: int
-) -> Literal["report", "retry", END]:
+) -> Literal["store_warnings", "retry", END]:
     """Validate insight output and decide next step.
     
-    Also performs data consistency validation and stores warnings in state
-    for the report agent to reference.
+    This function validates insights and performs data consistency validation.
+    It returns routing decisions but does NOT mutate state. Warnings are
+    stored by a separate node to maintain immutability.
     
     Args:
         state: Current workflow state
         max_retries: Maximum retry attempts
     
     Returns:
-        Next node name or END
+        Next node name: "store_warnings" (if validation passes and warnings exist),
+        "retry" (if validation fails and retries available), or END
     """
     validator = InsightValidator()
     insights = state.get("insights", {})
@@ -363,12 +333,11 @@ def _validate_insight_output(
             for warning in validation_warnings:
                 logger.debug(f"Data consistency warning: {warning}")
     
-    if validation_warnings:
-        state["validation_warnings"] = validation_warnings  # type: ignore
-    
     if result.is_valid:
         logger.info("Insight validation passed, proceeding to report")
-        return "report"
+        # If we have warnings, route to store_warnings node first
+        # Otherwise, we can go directly to report (but we'll use store_warnings for consistency)
+        return "store_warnings"
     elif retry_count < max_retries and state.get("plan"):
         logger.warning(
             f"Insight validation failed ({len(result.errors)} errors), "
@@ -381,6 +350,38 @@ def _validate_insight_output(
             "ending workflow"
         )
         return END
+
+
+def _store_validation_warnings(state: WorkflowState) -> WorkflowState:
+    """Store validation warnings in state immutably.
+    
+    This node performs data consistency validation and stores warnings
+    in the state using state helpers to maintain immutability. This
+    separates validation logic from state mutation.
+    
+    Args:
+        state: Current workflow state
+    
+    Returns:
+        Updated state with validation_warnings field populated
+    """
+    collected_data = state.get("collected_data")
+    validation_warnings: list[str] = []
+    
+    if collected_data and isinstance(collected_data, dict):
+        consistency_validator = DataConsistencyValidator()
+        consistency_result = consistency_validator.validate(collected_data)
+        
+        if consistency_result.has_warnings():
+            validation_warnings = consistency_result.warnings
+            logger.info(
+                f"Storing {len(validation_warnings)} data consistency warnings in state"
+            )
+            for warning in validation_warnings:
+                logger.debug(f"Data consistency warning: {warning}")
+    
+    # Use state helper to update immutably
+    return update_state(state, validation_warnings=validation_warnings)
 
 
 def _validate_report_output(
@@ -400,7 +401,8 @@ def _validate_report_output(
     
     # Report is stored as a formatted string in state
     # We perform basic validation: check if report exists and has minimum length
-    min_length = 1200
+    config = get_config()
+    min_length = config.min_report_length
     
     if report and len(report.strip()) >= min_length:
         logger.info("Report validation passed, proceeding to export")

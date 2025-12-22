@@ -3,20 +3,6 @@
 This module implements the DataConsistencyValidator that validates
 quantitative data consistency across competitor profiles, checking for
 logical inconsistencies, conflicting data points, and unrealistic values.
-
-Example:
-    ```python
-    from src.graph.validators.data_consistency_validator import DataConsistencyValidator
-    
-    validator = DataConsistencyValidator()
-    data = {
-        "competitors": [
-            {"name": "Comp1", "market_share": 35.0, "revenue": 2000000000},
-            {"name": "Comp2", "market_share": 20.0, "revenue": 1500000000},
-        ]
-    }
-    result = validator.validate(data)
-    ```
 """
 
 import logging
@@ -39,16 +25,6 @@ class DataConsistencyValidator(BaseValidator):
     The validator returns warnings (not errors) for inconsistencies, as
     these are data quality issues that should be noted but don't prevent
     workflow continuation.
-    
-    Example:
-        ```python
-        validator = DataConsistencyValidator()
-        data = {"competitors": [...]}
-        result = validator.validate(data)
-        if result.has_warnings():
-            for warning in result.warnings:
-                print(f"Warning: {warning}")
-        ```
     """
     
     # Reasonable range for market share sum (allows for incomplete data)

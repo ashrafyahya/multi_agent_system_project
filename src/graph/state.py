@@ -3,23 +3,6 @@
 This module defines the WorkflowState TypedDict that represents the
 state object passed through the LangGraph workflow. The state is immutable
 where possible and validated at each workflow step.
-
-Example:
-    ```python
-    from src.graph.state import WorkflowState
-    from langchain_core.messages import HumanMessage
-    
-    initial_state: WorkflowState = {
-        "messages": [HumanMessage(content="Analyze competitors")],
-        "plan": None,
-        "collected_data": None,
-        "insights": None,
-        "report": None,
-        "retry_count": 0,
-        "current_task": None,
-        "validation_errors": []
-    }
-    ```
 """
 
 from typing import Annotated, Any, TypedDict
@@ -54,6 +37,8 @@ class WorkflowState(TypedDict, total=False):
             executed in the workflow
         validation_errors: List of validation error messages encountered
             during workflow execution
+        validation_warnings: List of validation warning messages (non-critical
+            issues that don't block workflow but should be noted in report)
     """
     
     messages: Annotated[list[BaseMessage], add_messages]
@@ -65,6 +50,7 @@ class WorkflowState(TypedDict, total=False):
     retry_count: int
     current_task: str | None
     validation_errors: list[str]
+    validation_warnings: list[str]
 
 
 def create_initial_state(
@@ -83,15 +69,6 @@ def create_initial_state(
     
     Returns:
         WorkflowState dictionary with all fields initialized to defaults
-        
-    Example:
-        ```python
-        from src.graph.state import create_initial_state
-        
-        state = create_initial_state("Analyze competitors in the SaaS market")
-        assert state["retry_count"] == 0
-        assert len(state["messages"]) == 1
-        ```
     """
     from langchain_core.messages import HumanMessage
     
@@ -112,4 +89,5 @@ def create_initial_state(
         retry_count=0,
         current_task=None,
         validation_errors=[],
+        validation_warnings=[],
     )

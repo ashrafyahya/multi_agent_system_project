@@ -5,11 +5,12 @@ across all test files.
 """
 
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from langchain_core.language_models import BaseChatModel
 
 from src.config import Config
+from src.utils.llm_cache import clear_cache
 
 
 @pytest.fixture
@@ -28,7 +29,7 @@ def mock_config() -> Mock:
     config.max_retries = 3
     config.log_level = "INFO"
     config.data_dir = None
-    config.tavily_api_key = None
+    config.tavily_api_key = "test_tavily_api_key"
     config.llm_model_planner = None
     config.llm_model_supervisor = None
     config.llm_model_insight = None
@@ -51,3 +52,19 @@ def workflow_config() -> dict:
         "insight_temperature": 0.7,
         "report_temperature": 0.7,
     }
+
+
+@pytest.fixture(autouse=True)
+def clear_llm_cache():
+    """Clear LLM cache before and after each test.
+    
+    This ensures test isolation - each test starts with a clean cache
+    and doesn't leave cached responses for other tests. Tests that
+    specifically want to test caching behavior can manage the cache
+    themselves.
+    """
+    # Clear cache before each test
+    clear_cache()
+    yield
+    # Clear cache after each test
+    clear_cache()

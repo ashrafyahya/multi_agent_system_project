@@ -11,6 +11,7 @@ import pytest
 from langchain_groq import ChatGroq
 
 from src.config import Config
+from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState
 from src.main import initialize_llm, main, run_analysis
 
@@ -67,6 +68,8 @@ class TestRunAnalysis:
         mock_config.max_retries = 3
         mock_config.agent_log_dir = Path("./data/agent_logs")
         mock_config.agent_log_enabled = True
+        mock_config.min_query_length = 10
+        mock_config.max_query_length = 5000
         
         mock_llm = Mock(spec=ChatGroq)
         
@@ -110,6 +113,8 @@ class TestRunAnalysis:
         mock_config.max_retries = 3
         mock_config.agent_log_dir = Path("./data/agent_logs")
         mock_config.agent_log_enabled = True
+        mock_config.min_query_length = 10
+        mock_config.max_query_length = 5000
         mock_config.groq_api_key = "test_key"
         mock_config.llm_model = "llama-3.1-8b-instant"
         mock_config.llm_model_planner = None
@@ -147,6 +152,8 @@ class TestRunAnalysis:
         mock_config.max_retries = 3
         mock_config.agent_log_dir = Path("./data/agent_logs")
         mock_config.agent_log_enabled = True
+        mock_config.min_query_length = 10
+        mock_config.max_query_length = 5000
         mock_config.groq_api_key = "test_key"
         mock_config.llm_model = "llama-3.1-8b-instant"
         mock_config.llm_model_planner = None
@@ -175,6 +182,7 @@ class TestRunAnalysis:
     
     def test_run_analysis_raises_error_on_empty_query(self) -> None:
         """Test run_analysis raises error on empty query."""
+        # WorkflowError from sanitize_user_query is converted to ValueError for backward compatibility
         with pytest.raises(ValueError, match="User query cannot be empty"):
             run_analysis("")
         
@@ -197,6 +205,8 @@ class TestRunAnalysis:
         mock_config.max_retries = 3
         mock_config.agent_log_dir = Path("./data/agent_logs")
         mock_config.agent_log_enabled = True
+        mock_config.min_query_length = 10
+        mock_config.max_query_length = 5000
         
         with patch("src.main.get_config", return_value=mock_config):
             with patch("src.main.initialize_llm", side_effect=Exception("LLM error")):
@@ -211,6 +221,8 @@ class TestRunAnalysis:
         mock_config.max_retries = 3
         mock_config.agent_log_dir = Path("./data/agent_logs")
         mock_config.agent_log_enabled = True
+        mock_config.min_query_length = 10
+        mock_config.max_query_length = 5000
         
         mock_llm = Mock(spec=ChatGroq)
         
@@ -228,6 +240,8 @@ class TestRunAnalysis:
         mock_config.max_retries = 3
         mock_config.agent_log_dir = Path("./data/agent_logs")
         mock_config.agent_log_enabled = True
+        mock_config.min_query_length = 10
+        mock_config.max_query_length = 5000
         
         mock_llm = Mock(spec=ChatGroq)
         
@@ -249,6 +263,8 @@ class TestRunAnalysis:
         mock_config.max_retries = 3
         mock_config.agent_log_dir = Path("./data/agent_logs")
         mock_config.agent_log_enabled = True
+        mock_config.min_query_length = 10
+        mock_config.max_query_length = 5000
         
         mock_llm = Mock(spec=ChatGroq)
         

@@ -116,56 +116,6 @@ def extract_bookmarks(report_content: str) -> list[dict[str, Any]]:
     return bookmarks
 
 
-def add_bookmarks_to_canvas(
-    canvas: Any, bookmarks: list[dict[str, Any]]
-) -> None:
-    """Add bookmarks to PDF canvas.
-
-    Creates clickable bookmarks in the PDF for navigation.
-    Uses ReportLab's bookmark functionality correctly.
-
-    Args:
-        canvas: ReportLab canvas object
-        bookmarks: List of bookmark dictionaries
-    """
-    if not bookmarks:
-        return
-
-    try:
-        # Track parent bookmark keys for nesting
-        parent_keys: dict[int, str] = {}
-
-        for bookmark in bookmarks:
-            title = bookmark["title"]
-            level = bookmark["level"]
-
-            # Create bookmark destination (returns a string key)
-            bookmark_key = canvas.bookmarkPage(title)
-
-            # Add to outline with correct nesting
-            # ReportLab's addOutlineEntry signature: (title, key, level, closed, ...)
-            if level == 1:
-                # Top-level bookmark
-                canvas.addOutlineEntry(title, bookmark_key, level=0, closed=False)
-                parent_keys[1] = bookmark_key
-            elif level == 2:
-                # Second-level bookmark (nested under H1)
-                # For nesting, we need to track the parent key
-                # ReportLab doesn't support parent parameter directly in addOutlineEntry
-                # Instead, we rely on the order and level to create hierarchy
-                canvas.addOutlineEntry(title, bookmark_key, level=1, closed=False)
-                parent_keys[2] = bookmark_key
-            elif level == 3:
-                # Third-level bookmark (nested under H2)
-                canvas.addOutlineEntry(title, bookmark_key, level=2, closed=False)
-
-        logger.debug(f"Added {len(bookmarks)} bookmarks to PDF")
-
-    except Exception as e:
-        logger.warning(f"Error adding bookmarks to PDF: {e}")
-        # Don't fail PDF generation if bookmarks fail
-
-
 def extract_keywords(report_content: str) -> str:
     """Extract keywords from report content.
 

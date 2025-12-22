@@ -21,6 +21,7 @@ from src.agents.base_agent import BaseAgent
 from src.config import get_config
 from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState
+from src.graph.state_utils import update_state
 from src.template.pdf_generator import export_to_pdf
 from src.template.pdf_utils import get_pdf_configs
 
@@ -193,9 +194,11 @@ class ExportAgent(BaseAgent):
         Returns:
             Updated WorkflowState with export_paths populated
         """
-        new_state = state.copy()
-        new_state["export_paths"] = export_paths
-        new_state["current_task"] = "Export completed successfully"
+        new_state = update_state(
+            state,
+            export_paths=export_paths,
+            current_task="Export completed successfully"
+        )
 
         logger.info(
             f"Export completed: {len(export_paths)} file(s) generated in {output_dir}"

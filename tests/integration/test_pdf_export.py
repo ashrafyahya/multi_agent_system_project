@@ -1,7 +1,7 @@
 """Integration tests for enhanced PDF export functionality.
 
 This module contains integration tests that verify full PDF generation
-with branding, layout, metadata, and visualizations.
+with branding, layout, and metadata.
 """
 
 import tempfile
@@ -182,78 +182,6 @@ class TestPDFExportIntegration:
                 # Verify PDF has metadata by checking file size > 0
                 # (actual metadata verification would require PDF parsing)
                 assert pdf_path.stat().st_size > 0
-    
-    @pytest.mark.skip(reason="Visualizations module not implemented")
-    def test_pdf_export_with_visualizations(self) -> None:
-        """Test PDF export embeds visualizations."""
-        mock_llm = Mock(spec=BaseChatModel)
-        config = {
-            "export_format": "pdf",
-            "include_visualizations": True,
-        }
-        agent = ExportAgent(llm=mock_llm, config=config)
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = Path(tmpdir) / "exports"
-            config["output_dir"] = str(output_dir)
-            
-            with patch("src.agents.export_agent.get_config") as mock_get_config:
-                mock_app_config = Mock()
-                mock_app_config.data_dir = Path(tmpdir)
-                mock_get_config.return_value = mock_app_config
-                
-                # Patch matplotlib imports
-                import sys
-                mock_matplotlib = MagicMock()
-                mock_pyplot = MagicMock()
-                mock_fig = MagicMock()
-                mock_axes = MagicMock()
-                mock_pyplot.subplots.return_value = (mock_fig, mock_axes)
-                mock_pyplot.savefig.return_value = None
-                mock_pyplot.close.return_value = None
-                mock_pyplot.tight_layout.return_value = None
-                mock_pyplot.suptitle.return_value = None
-                mock_pyplot.cm = MagicMock()
-                mock_pyplot.cm.viridis.return_value = [(0.5, 0.5, 0.5, 1.0)]
-                mock_pyplot.cm.Set3.return_value = [(0.5, 0.5, 0.5, 1.0)]
-                mock_pyplot.cm.plasma.return_value = [(0.5, 0.5, 0.5, 1.0)]
-                mock_pyplot.linspace = MagicMock(return_value=[0.5])
-                mock_matplotlib.pyplot = mock_pyplot
-                mock_matplotlib.patches = MagicMock()
-                
-                with patch.dict(
-                    sys.modules,
-                    {
-                        "matplotlib": mock_matplotlib,
-                        "matplotlib.pyplot": mock_pyplot,
-                        "matplotlib.patches": mock_matplotlib.patches,
-                    },
-                ):
-                    with patch("numpy.arange", return_value=[0, 1]):
-                        state = create_initial_state("Test")
-                        state["report"] = "# Test Report\n## Section 1\nContent here."
-                        state["insights"] = {
-                            "swot": {
-                                "strengths": ["Strong brand"],
-                                "weaknesses": ["High prices"],
-                                "opportunities": ["Emerging markets"],
-                                "threats": ["New competitors"],
-                            },
-                            "trends": ["Digital transformation"],
-                            "opportunities": ["Expansion"],
-                        }
-                        
-                        result_state = agent.execute(state)
-                        
-                        assert "export_paths" in result_state
-                        assert "pdf" in result_state["export_paths"]
-                        pdf_path = Path(result_state["export_paths"]["pdf"])
-                        assert pdf_path.exists()
-                        # Should have visualization paths
-                        assert any(
-                            key.startswith("swot") or key.startswith("trends")
-                            for key in result_state["export_paths"].keys()
-                        )
     
     def test_pdf_export_with_branding_and_layout(self) -> None:
         """Test PDF export with both branding and layout configs."""

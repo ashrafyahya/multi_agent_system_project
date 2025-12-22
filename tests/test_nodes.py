@@ -4,25 +4,19 @@ This module contains unit tests for all workflow nodes to verify
 pure function behavior, state updates, and error handling.
 """
 
-import pytest
 from unittest.mock import Mock, patch
 
+import pytest
 from langchain_core.language_models import BaseChatModel
 
 from src.exceptions.collector_error import CollectorError
 from src.exceptions.workflow_error import WorkflowError
-from src.graph.nodes.data_collector_node import (
-    create_data_collector_node,
-    data_collector_node,
-)
+from src.graph.nodes.data_collector_node import create_data_collector_node
 from src.graph.nodes.insight_node import create_insight_node
-from src.graph.nodes.planner_node import create_planner_node, planner_node
+from src.graph.nodes.planner_node import create_planner_node
 from src.graph.nodes.report_node import create_report_node
-from src.graph.nodes.retry_node import create_retry_node, retry_node
-from src.graph.nodes.supervisor_node import (
-    create_supervisor_node,
-    supervisor_node,
-)
+from src.graph.nodes.retry_node import create_retry_node
+from src.graph.nodes.supervisor_node import create_supervisor_node
 from src.graph.state import WorkflowState, create_initial_state
 
 
@@ -174,40 +168,6 @@ class TestDataCollectorNode:
             assert len(result["validation_errors"]) > 0
             assert any("Unexpected error" in err for err in result["validation_errors"])
             assert result["current_task"] == "Data collection failed"
-    
-    def test_data_collector_node_direct_function_with_llm_in_state(self) -> None:
-        """Test data collector node direct function with llm in state."""
-        from src.agents.data_collector import DataCollectorAgent
-        
-        mock_llm = Mock(spec=BaseChatModel)
-        config = {"max_results": 10}
-        
-        with patch("src.graph.nodes.data_collector_node.DataCollectorAgent") as mock_agent_class:
-            mock_agent = Mock(spec=DataCollectorAgent)
-            mock_agent.execute.return_value = {
-                "messages": [],
-                "plan": {"tasks": ["Find competitors"]},
-                "collected_data": {"competitors": []},
-            }
-            mock_agent_class.return_value = mock_agent
-            
-            state: WorkflowState = create_initial_state("Test")
-            state["plan"] = {"tasks": ["Find competitors"], "minimum_results": 4}
-            state["llm"] = mock_llm  # type: ignore
-            state["config"] = config  # type: ignore
-            
-            result = data_collector_node(state)
-            
-            assert "collected_data" in result
-    
-    def test_data_collector_node_direct_function_missing_llm(self) -> None:
-        """Test data collector node direct function raises error if llm missing."""
-        state = create_initial_state("Test")
-        state["plan"] = {"tasks": ["Find competitors"], "minimum_results": 4}
-        # No llm in state
-        
-        with pytest.raises(WorkflowError, match="LLM instance required"):
-            data_collector_node(state)
     
     def test_data_collector_node_preserves_state_fields(self) -> None:
         """Test data collector node preserves existing state fields."""
@@ -405,43 +365,6 @@ class TestInsightNode:
             assert len(result["validation_errors"]) > 0
             assert any("Unexpected error" in err for err in result["validation_errors"])
             assert result["current_task"] == "Insight generation failed"
-    
-    def test_insight_node_direct_function_with_llm_in_state(self) -> None:
-        """Test insight node direct function with llm in state."""
-        from src.agents.insight_agent import InsightAgent
-        from src.graph.nodes.insight_node import insight_node
-        
-        mock_llm = Mock(spec=BaseChatModel)
-        config = {"temperature": 0.7}
-        
-        with patch("src.graph.nodes.insight_node.InsightAgent") as mock_agent_class:
-            mock_agent = Mock(spec=InsightAgent)
-            mock_agent.execute.return_value = {
-                "messages": [],
-                "collected_data": {"competitors": []},
-                "insights": {"swot": {}, "positioning": "Test"},
-            }
-            mock_agent_class.return_value = mock_agent
-            
-            state: WorkflowState = create_initial_state("Test")
-            state["collected_data"] = {"competitors": []}
-            state["llm"] = mock_llm  # type: ignore
-            state["config"] = config  # type: ignore
-            
-            result = insight_node(state)
-            
-            assert "insights" in result
-    
-    def test_insight_node_direct_function_missing_llm(self) -> None:
-        """Test insight node direct function raises error if llm missing."""
-        from src.graph.nodes.insight_node import insight_node
-        
-        state = create_initial_state("Test")
-        state["collected_data"] = {"competitors": []}
-        # No llm in state
-        
-        with pytest.raises(WorkflowError, match="LLM instance required"):
-            insight_node(state)
     
     def test_insight_node_preserves_state_fields(self) -> None:
         """Test insight node preserves existing state fields."""
@@ -655,43 +578,6 @@ class TestReportNode:
             assert any("Unexpected error" in err for err in result["validation_errors"])
             assert result["current_task"] == "Report generation failed"
     
-    def test_report_node_direct_function_with_llm_in_state(self) -> None:
-        """Test report node direct function with llm in state."""
-        from src.agents.report_agent import ReportAgent
-        from src.graph.nodes.report_node import report_node
-        
-        mock_llm = Mock(spec=BaseChatModel)
-        config = {"temperature": 0.7}
-        
-        with patch("src.graph.nodes.report_node.ReportAgent") as mock_agent_class:
-            mock_agent = Mock(spec=ReportAgent)
-            mock_agent.execute.return_value = {
-                "messages": [],
-                "insights": {},
-                "report": "Test report",
-            }
-            mock_agent_class.return_value = mock_agent
-            
-            state: WorkflowState = create_initial_state("Test")
-            state["insights"] = {"swot": {}, "positioning": "Test"}
-            state["llm"] = mock_llm  # type: ignore
-            state["config"] = config  # type: ignore
-            
-            result = report_node(state)
-            
-            assert "report" in result
-    
-    def test_report_node_direct_function_missing_llm(self) -> None:
-        """Test report node direct function raises error if llm missing."""
-        from src.graph.nodes.report_node import report_node
-        
-        state = create_initial_state("Test")
-        state["insights"] = {"swot": {}, "positioning": "Test"}
-        # No llm in state
-        
-        with pytest.raises(WorkflowError, match="LLM instance required"):
-            report_node(state)
-    
     def test_report_node_preserves_state_fields(self) -> None:
         """Test report node preserves existing state fields."""
         from src.agents.report_agent import ReportAgent
@@ -881,15 +767,19 @@ class TestRetryNode:
         assert state2["retry_count"] == 1
     
     def test_retry_node_handles_missing_plan(self) -> None:
-        """Test retry node raises error if plan missing."""
+        """Test retry node handles missing plan gracefully."""
         node = create_retry_node(max_retries=3)
-        
+
         state = create_initial_state("Test")
         state["retry_count"] = 0
         # No plan
-        
-        with pytest.raises(WorkflowError, match="Cannot retry without a plan"):
-            node(state)
+
+        result = node(state)
+
+        # Should not raise exception, but add error to validation_errors
+        assert len(result["validation_errors"]) > 0
+        assert any("Cannot retry without a plan" in err for err in result["validation_errors"])
+        assert result["current_task"] == "Retry failed"
     
     def test_retry_node_modifies_minimum_results(self) -> None:
         """Test retry node increases minimum_results in plan."""
@@ -924,22 +814,6 @@ class TestRetryNode:
         # Should add context keywords on retry 2+
         assert isinstance(enhanced_task, str)
         assert len(enhanced_task) > len("Find pricing")
-    
-    def test_retry_node_direct_function_uses_config(self) -> None:
-        """Test retry node direct function uses config for max_retries."""
-        with patch("src.config.get_config") as mock_get_config:
-            mock_config = Mock()
-            mock_config.max_retries = 5
-            mock_get_config.return_value = mock_config
-            
-            state = create_initial_state("Test")
-            state["plan"] = {"tasks": ["Find competitors"]}
-            state["retry_count"] = 4  # One below max
-            
-            result = retry_node(state)
-            
-            # Should increment
-            assert result["retry_count"] == 5
     
     def test_retry_node_no_side_effects(self) -> None:
         """Test retry node has no side effects."""
@@ -990,6 +864,187 @@ class TestRetryNode:
         assert isinstance(result["plan"]["tasks"][0], str)  # Enhanced
         assert isinstance(result["plan"]["tasks"][1], dict)  # Unchanged
         assert isinstance(result["plan"]["tasks"][2], int)  # Unchanged
+    
+    def test_retry_node_intelligent_retry_with_llm(self) -> None:
+        """Test intelligent retry uses LLM to improve queries based on errors."""
+        import json
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        # Mock LLM response with improved queries
+        improved_queries = [
+            "Find competitors in SaaS market with pricing information",
+            "Analyze competitor features and market positioning"
+        ]
+        mock_response = Mock()
+        mock_response.content = json.dumps(improved_queries)
+        
+        node = create_retry_node(max_retries=3, llm=mock_llm)
+        
+        state = create_initial_state("Test")
+        state["plan"] = {
+            "tasks": ["Find competitors", "Analyze features"],
+            "minimum_results": 4
+        }
+        state["retry_count"] = 1
+        state["validation_errors"] = [
+            "Insufficient competitor data collected",
+            "Missing pricing information"
+        ]
+        
+        with patch("src.graph.nodes.retry_node.get_config") as mock_config, \
+             patch("src.graph.nodes.retry_node.invoke_llm_with_retry") as mock_invoke:
+            mock_config.return_value.intelligent_retry_enabled = True
+            mock_invoke.return_value = mock_response
+            
+            result = node(state)
+        
+        # Verify LLM was called through rate limiter
+        assert mock_invoke.called
+        # Verify tasks were modified
+        assert "plan" in result
+        assert result["plan"]["tasks"] != state["plan"]["tasks"]
+        # Verify improved queries are in result
+        assert len(result["plan"]["tasks"]) == len(improved_queries)
+    
+    def test_retry_node_fallback_to_rule_based_when_llm_fails(self) -> None:
+        """Test retry falls back to rule-based when LLM fails."""
+        mock_llm = Mock(spec=BaseChatModel)
+        
+        node = create_retry_node(max_retries=3, llm=mock_llm)
+        
+        state = create_initial_state("Test")
+        state["plan"] = {"tasks": ["Find competitors"]}
+        state["retry_count"] = 1
+        state["validation_errors"] = ["Error 1"]
+        
+        with patch("src.graph.nodes.retry_node.get_config") as mock_config, \
+             patch("src.graph.nodes.retry_node.invoke_llm_with_retry") as mock_invoke:
+            mock_config.return_value.intelligent_retry_enabled = True
+            # Mock LLM to raise exception
+            mock_invoke.side_effect = Exception("LLM error")
+            
+            result = node(state)
+        
+        # Should still work with rule-based fallback
+        assert "plan" in result
+        assert len(result["plan"]["tasks"]) == 1
+        # Should contain original task plus enhancements
+        assert "Find competitors" in result["plan"]["tasks"][0]
+    
+    def test_retry_node_fallback_when_intelligent_retry_disabled(self) -> None:
+        """Test retry uses rule-based when intelligent_retry_enabled is False."""
+        mock_llm = Mock(spec=BaseChatModel)
+        
+        node = create_retry_node(max_retries=3, llm=mock_llm)
+        
+        state = create_initial_state("Test")
+        state["plan"] = {"tasks": ["Find competitors"]}
+        state["retry_count"] = 1
+        state["validation_errors"] = ["Error 1"]
+        
+        with patch("src.graph.nodes.retry_node.get_config") as mock_config, \
+             patch("src.graph.nodes.retry_node.invoke_llm_with_retry") as mock_invoke:
+            mock_config.return_value.intelligent_retry_enabled = False
+            
+            result = node(state)
+        
+        # LLM should not be called
+        assert not mock_invoke.called
+        # Should use rule-based enhancement
+        assert "plan" in result
+        assert "Find competitors" in result["plan"]["tasks"][0]
+    
+    def test_retry_node_fallback_when_no_llm_provided(self) -> None:
+        """Test retry uses rule-based when no LLM is provided."""
+        node = create_retry_node(max_retries=3, llm=None)
+        
+        state = create_initial_state("Test")
+        state["plan"] = {"tasks": ["Find competitors"]}
+        state["retry_count"] = 1
+        state["validation_errors"] = ["Error 1"]
+        
+        result = node(state)
+        
+        # Should use rule-based enhancement
+        assert "plan" in result
+        assert "Find competitors" in result["plan"]["tasks"][0]
+        # Should have enhancements
+        assert len(result["plan"]["tasks"][0]) > len("Find competitors")
+    
+    def test_retry_node_fallback_when_no_validation_errors(self) -> None:
+        """Test retry uses rule-based when no validation errors provided."""
+        mock_llm = Mock(spec=BaseChatModel)
+        
+        node = create_retry_node(max_retries=3, llm=mock_llm)
+        
+        state = create_initial_state("Test")
+        state["plan"] = {"tasks": ["Find competitors"]}
+        state["retry_count"] = 1
+        state["validation_errors"] = []  # No errors
+        
+        with patch("src.graph.nodes.retry_node.get_config") as mock_config, \
+             patch("src.graph.nodes.retry_node.invoke_llm_with_retry") as mock_invoke:
+            mock_config.return_value.intelligent_retry_enabled = True
+            
+            result = node(state)
+        
+        # LLM should not be called (no errors to analyze)
+        assert not mock_invoke.called
+        # Should use rule-based enhancement
+        assert "plan" in result
+        assert "Find competitors" in result["plan"]["tasks"][0]
+    
+    def test_retry_node_intelligent_retry_handles_invalid_json(self) -> None:
+        """Test intelligent retry falls back when LLM returns invalid JSON."""
+        mock_llm = Mock(spec=BaseChatModel)
+        # Mock LLM to return invalid JSON
+        mock_response = Mock()
+        mock_response.content = "This is not valid JSON"
+        
+        node = create_retry_node(max_retries=3, llm=mock_llm)
+        
+        state = create_initial_state("Test")
+        state["plan"] = {"tasks": ["Find competitors"]}
+        state["retry_count"] = 1
+        state["validation_errors"] = ["Error 1"]
+        
+        with patch("src.graph.nodes.retry_node.get_config") as mock_config, \
+             patch("src.graph.nodes.retry_node.invoke_llm_with_retry") as mock_invoke:
+            mock_config.return_value.intelligent_retry_enabled = True
+            mock_invoke.return_value = mock_response
+            
+            result = node(state)
+        
+        # Should fall back to rule-based
+        assert "plan" in result
+        assert "Find competitors" in result["plan"]["tasks"][0]
+    
+    def test_retry_node_intelligent_retry_handles_wrong_array_length(self) -> None:
+        """Test intelligent retry falls back when LLM returns wrong number of queries."""
+        import json
+        mock_llm = Mock(spec=BaseChatModel)
+        # Mock LLM to return wrong number of queries
+        mock_response = Mock()
+        mock_response.content = json.dumps(["Only one query"])  # Should be 2
+        
+        node = create_retry_node(max_retries=3, llm=mock_llm)
+        
+        state = create_initial_state("Test")
+        state["plan"] = {"tasks": ["Find competitors", "Analyze features"]}
+        state["retry_count"] = 1
+        state["validation_errors"] = ["Error 1"]
+        
+        with patch("src.graph.nodes.retry_node.get_config") as mock_config, \
+             patch("src.graph.nodes.retry_node.invoke_llm_with_retry") as mock_invoke:
+            mock_config.return_value.intelligent_retry_enabled = True
+            mock_invoke.return_value = mock_response
+            
+            result = node(state)
+        
+        # Should fall back to rule-based
+        assert "plan" in result
+        assert len(result["plan"]["tasks"]) == 2
+        assert "Find competitors" in result["plan"]["tasks"][0]
 
 
 class TestPlannerNode:
@@ -1058,37 +1113,6 @@ class TestPlannerNode:
             
             assert len(result["validation_errors"]) > 0
             assert result["current_task"] == "Planning failed"
-    
-    def test_planner_node_direct_function_with_llm_in_state(self) -> None:
-        """Test planner node direct function with llm in state."""
-        from src.agents.planner_agent import PlannerAgent
-        
-        mock_llm = Mock(spec=BaseChatModel)
-        config = {"temperature": 0}
-        
-        with patch("src.graph.nodes.planner_node.PlannerAgent") as mock_agent_class:
-            mock_agent = Mock(spec=PlannerAgent)
-            mock_agent.execute.return_value = {
-                "messages": [],
-                "plan": {"tasks": ["Find competitors"]},
-            }
-            mock_agent_class.return_value = mock_agent
-            
-            state: WorkflowState = create_initial_state("Test")
-            state["llm"] = mock_llm  # type: ignore
-            state["config"] = config  # type: ignore
-            
-            result = planner_node(state)
-            
-            assert "plan" in result
-    
-    def test_planner_node_direct_function_missing_llm(self) -> None:
-        """Test planner node direct function raises error if llm missing."""
-        state = create_initial_state("Test")
-        # No llm in state
-        
-        with pytest.raises(WorkflowError, match="LLM instance required"):
-            planner_node(state)
     
     def test_planner_node_pure_function(self) -> None:
         """Test that planner node is a pure function."""
@@ -1188,40 +1212,6 @@ class TestSupervisorNode:
             assert len(result["validation_errors"]) > 0
             assert result["current_task"] == "Supervisor failed"
     
-    def test_supervisor_node_direct_function_with_llm_in_state(self) -> None:
-        """Test supervisor node direct function with llm in state."""
-        from src.agents.supervisor_agent import SupervisorAgent
-        
-        mock_llm = Mock(spec=BaseChatModel)
-        config = {"max_retries": 3}
-        
-        with patch("src.graph.nodes.supervisor_node.SupervisorAgent") as mock_agent_class:
-            mock_agent = Mock(spec=SupervisorAgent)
-            mock_agent.execute.return_value = {
-                "messages": [],
-                "plan": {"tasks": ["Find competitors"]},
-                "current_task": "Test",
-            }
-            mock_agent_class.return_value = mock_agent
-            
-            state: WorkflowState = create_initial_state("Test")
-            state["plan"] = {"tasks": ["Find competitors"]}
-            state["llm"] = mock_llm  # type: ignore
-            state["config"] = config  # type: ignore
-            
-            result = supervisor_node(state)
-            
-            assert "current_task" in result
-    
-    def test_supervisor_node_direct_function_missing_llm(self) -> None:
-        """Test supervisor node direct function raises error if llm missing."""
-        state = create_initial_state("Test")
-        state["plan"] = {"tasks": ["Find competitors"]}
-        # No llm in state
-        
-        with pytest.raises(WorkflowError, match="LLM instance required"):
-            supervisor_node(state)
-    
     def test_supervisor_node_pure_function(self) -> None:
         """Test that supervisor node is a pure function."""
         from src.agents.supervisor_agent import SupervisorAgent
@@ -1259,10 +1249,11 @@ class TestExportNode:
     
     def test_export_node_success(self) -> None:
         """Test export node executes successfully."""
-        from src.graph.nodes.export_node import create_export_node
-        from unittest.mock import patch, MagicMock
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.graph.nodes.export_node import create_export_node
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"export_format": "pdf", "include_visualizations": False}
@@ -1301,10 +1292,11 @@ class TestExportNode:
     
     def test_export_node_pure_function(self) -> None:
         """Test that export node is a pure function."""
-        from src.graph.nodes.export_node import create_export_node
-        from unittest.mock import patch, MagicMock
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.graph.nodes.export_node import create_export_node
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"export_format": "pdf"}
@@ -1354,8 +1346,8 @@ class TestExportNode:
     
     def test_export_node_handles_workflow_error(self) -> None:
         """Test export node handles WorkflowError gracefully."""
-        from src.graph.nodes.export_node import create_export_node
         from src.agents.export_agent import ExportAgent
+        from src.graph.nodes.export_node import create_export_node
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"export_format": "pdf"}
@@ -1381,8 +1373,8 @@ class TestExportNode:
     
     def test_export_node_handles_unexpected_error(self) -> None:
         """Test export node handles unexpected errors gracefully."""
-        from src.graph.nodes.export_node import create_export_node
         from src.agents.export_agent import ExportAgent
+        from src.graph.nodes.export_node import create_export_node
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"export_format": "pdf"}
@@ -1403,63 +1395,13 @@ class TestExportNode:
             assert any("Unexpected error" in err for err in result["validation_errors"])
             assert result["current_task"] == "Export generation failed"
     
-    def test_export_node_direct_function_with_llm_in_state(self) -> None:
-        """Test export node direct function with llm in state."""
-        from src.graph.nodes.export_node import export_node
-        from unittest.mock import patch, MagicMock
-        from pathlib import Path
-        import tempfile
-        
-        mock_llm = Mock(spec=BaseChatModel)
-        config = {"export_format": "pdf"}
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config["output_dir"] = str(Path(tmpdir) / "exports")
-            
-            with patch("src.config.get_config") as mock_get_config:
-                mock_app_config = Mock()
-                mock_app_config.data_dir = Path(tmpdir)
-                mock_get_config.return_value = mock_app_config
-                
-                with patch("src.template.template_engine.DefaultPDFTemplateEngine") as mock_engine_class:
-                    mock_engine_instance = MagicMock()
-                    mock_engine_instance.create_cover_page.return_value = []
-                    mock_engine_instance.create_table_of_contents.return_value = []
-                    mock_engine_instance.create_header.return_value = None
-                    mock_engine_instance.create_footer.return_value = None
-                    mock_engine_class.return_value = mock_engine_instance
-                    
-                    with patch("reportlab.platypus.SimpleDocTemplate") as mock_doc:
-                        mock_doc_instance = MagicMock()
-                        mock_doc_instance.build = MagicMock(return_value=None)
-                        mock_doc.return_value = mock_doc_instance
-                        
-                        state: WorkflowState = create_initial_state("Test")
-                        state["report"] = "# Report\n## Summary\nTest content"
-                        state["llm"] = mock_llm  # type: ignore
-                        state["config"] = config  # type: ignore
-                        
-                        result = export_node(state)
-                        
-                        assert "export_paths" in result
-    
-    def test_export_node_direct_function_missing_llm(self) -> None:
-        """Test export node direct function raises error if llm missing."""
-        from src.graph.nodes.export_node import export_node
-        
-        state = create_initial_state("Test")
-        state["report"] = "# Report\n## Summary\nTest content"
-        # No llm in state
-        
-        with pytest.raises(WorkflowError, match="LLM instance required"):
-            export_node(state)
-    
     def test_export_node_preserves_state_fields(self) -> None:
         """Test export node preserves existing state fields."""
-        from src.graph.nodes.export_node import create_export_node
-        from unittest.mock import patch, MagicMock
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.graph.nodes.export_node import create_export_node
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"export_format": "pdf"}
@@ -1499,10 +1441,11 @@ class TestExportNode:
     
     def test_export_node_no_side_effects(self) -> None:
         """Test export node has no side effects."""
-        from src.graph.nodes.export_node import create_export_node
-        from unittest.mock import patch, MagicMock
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.graph.nodes.export_node import create_export_node
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"export_format": "pdf"}
@@ -1543,8 +1486,8 @@ class TestExportNode:
     
     def test_export_node_handles_missing_report(self) -> None:
         """Test export node handles missing report gracefully."""
-        from src.graph.nodes.export_node import create_export_node
         from src.agents.export_agent import ExportAgent
+        from src.graph.nodes.export_node import create_export_node
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"export_format": "pdf"}
@@ -1566,10 +1509,11 @@ class TestExportNode:
     
     def test_export_node_handles_missing_insights(self) -> None:
         """Test export node handles missing insights gracefully."""
-        from src.graph.nodes.export_node import create_export_node
-        from unittest.mock import patch, MagicMock
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        from src.graph.nodes.export_node import create_export_node
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"export_format": "pdf", "include_visualizations": True}
@@ -1607,8 +1551,8 @@ class TestExportNode:
     
     def test_export_node_handles_file_system_errors(self) -> None:
         """Test export node handles file system errors gracefully."""
-        from src.graph.nodes.export_node import create_export_node
         from src.agents.export_agent import ExportAgent
+        from src.graph.nodes.export_node import create_export_node
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"export_format": "pdf", "output_dir": "/invalid/path"}

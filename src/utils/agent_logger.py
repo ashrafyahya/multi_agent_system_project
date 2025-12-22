@@ -3,15 +3,6 @@
 This module provides the AgentLogger class that logs agent outputs to
 timestamped plain text files. Each agent's output is logged to a separate
 file, making it easy to track what each agent produced during workflow execution.
-
-Example:
-    ```python
-    from src.utils.agent_logger import AgentLogger
-    from pathlib import Path
-    
-    logger = AgentLogger(log_dir=Path("./data/agent_logs"), enabled=True)
-    logger.log_agent_output("planner_agent", {"plan": {...}}, state)
-    ```
 """
 
 import json
@@ -38,22 +29,6 @@ class AgentLogger:
     Attributes:
         log_dir: Directory where log files will be stored
         enabled: Whether logging is enabled (if False, all logging operations are no-ops)
-    
-    Example:
-        ```python
-        from pathlib import Path
-        from src.utils.agent_logger import AgentLogger
-        
-        logger = AgentLogger(
-            log_dir=Path("./data/agent_logs"),
-            enabled=True
-        )
-        
-        # Log agent output
-        output = {"plan": {"tasks": ["task1", "task2"]}}
-        state = {...}  # WorkflowState
-        logger.log_agent_output("planner_agent", output, state)
-        ```
     """
     
     def __init__(self, log_dir: Path, enabled: bool = True) -> None:
@@ -64,16 +39,6 @@ class AgentLogger:
                 if it doesn't exist.
             enabled: Whether logging is enabled. If False, all logging
                 operations become no-ops.
-        
-        Example:
-            ```python
-            from pathlib import Path
-            
-            logger = AgentLogger(
-                log_dir=Path("./data/agent_logs"),
-                enabled=True
-            )
-            ```
         """
         self.log_dir = log_dir
         self.enabled = enabled
@@ -97,15 +62,6 @@ class AgentLogger:
             agent_name: Name of the agent (e.g., "planner_agent", "insight_agent")
             output: Agent output to log. Can be a dictionary, string, or None.
             state: Current workflow state for context information
-        
-        Example:
-            ```python
-            logger.log_agent_output(
-                "planner_agent",
-                {"plan": {"tasks": ["task1"]}},
-                state
-            )
-            ```
         """
         if not self.enabled:
             return
@@ -300,12 +256,6 @@ class AgentLogger:
         
         Returns:
             Path object for the log file
-        
-        Example:
-            ```python
-            path = logger._get_log_file_path("planner_agent")
-            # Returns: Path("./data/agent_logs/planner_agent_20241219_212734.log")
-            ```
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         # Normalize agent name for filename (replace spaces with underscores)

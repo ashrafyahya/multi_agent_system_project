@@ -13,6 +13,7 @@ objects instead of raising exceptions for validation failures.
 import logging
 from typing import Any
 
+from src.config import get_config
 from src.graph.validators.base_validator import BaseValidator, ValidationResult
 from src.tools.text_utils import validate_url
 
@@ -31,30 +32,13 @@ class CollectorValidator(BaseValidator):
     - No empty required fields (name, source_url)
     - Valid URL formats for source_url and website
     - No duplicate competitor entries (by name)
-    
-    Example:
-        ```python
-        from src.graph.validators.collector_validator import CollectorValidator
-        
-        validator = CollectorValidator()
-        result = validator.validate({
-            "competitors": [
-                {"name": "Comp1", "source_url": "https://example.com"},
-                {"name": "Comp2", "source_url": "https://example2.com"},
-                {"name": "Comp3", "source_url": "https://example3.com"},
-                {"name": "Comp4", "source_url": "https://example4.com"},
-            ]
-        })
-        
-        if result.is_valid:
-            print("Validation passed")
-        else:
-            for error in result.errors:
-                print(f"Error: {error}")
-        ```
     """
     
-    MIN_SOURCES = 4
+    def __init__(self) -> None:
+        """Initialize validator with configuration values."""
+        super().__init__()
+        config = get_config()
+        self.min_sources = config.min_collector_sources
     
     def validate(self, data: dict[str, Any]) -> ValidationResult:
         """Validate collected competitor data.
@@ -82,16 +66,6 @@ class CollectorValidator(BaseValidator):
             - is_valid: True if all validations pass
             - errors: List of error messages for validation failures
             - warnings: List of warning messages for non-critical issues
-            
-        Example:
-            ```python
-            validator = CollectorValidator()
-            result = validator.validate(collector_output)
-            
-            if not result.is_valid:
-                logger.error(f"Validation failed: {result.get_summary()}")
-                # Handle errors, possibly trigger retry
-            ```
         """
         result = ValidationResult.success()
         
@@ -107,9 +81,9 @@ class CollectorValidator(BaseValidator):
             return result
         
         # Check minimum sources
-        if len(competitors) < self.MIN_SOURCES:
+        if len(competitors) < self.min_sources:
             result.add_error(
-                f"Minimum {self.MIN_SOURCES} sources required, "
+                f"Minimum {self.min_sources} sources required, "
                 f"found {len(competitors)}"
             )
         

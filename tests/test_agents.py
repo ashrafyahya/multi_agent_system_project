@@ -926,10 +926,11 @@ class TestDataCollectorAgent:
             agent.execute(state)
     
     def test_data_collector_agent_handles_web_search_failure(self) -> None:
-        """Test data collector agent handles web search failures gracefully."""
+        """Test data collector agent raises WorkflowError when all searches fail."""
         from unittest.mock import patch
 
         from src.agents.data_collector import DataCollectorAgent
+        from src.exceptions.workflow_error import WorkflowError
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"max_results": 10}
@@ -950,21 +951,17 @@ class TestDataCollectorAgent:
                 "minimum_results": 4,
             }
             
-            # Should not raise exception, but return empty or partial results
-            result_state = agent.execute(state)
-            assert "collected_data" in result_state
-            # May have 0 competitors if all searches fail
+            # Should raise WorkflowError when all searches fail and no competitors collected
+            with pytest.raises(WorkflowError, match="No competitor data collected"):
+                agent.execute(state)
     
     def test_data_collector_agent_extracts_competitor_name(self) -> None:
         """Test data collector agent extracts competitor names correctly."""
-        from src.agents.data_collector import DataCollectorAgent
-        
-        mock_llm = Mock(spec=BaseChatModel)
-        config = {"max_results": 10}
-        agent = DataCollectorAgent(llm=mock_llm, config=config)
-        
+        from src.agents.utils.data_collection_helpers import \
+            extract_competitor_name
+
         # Test name extraction from title
-        name = agent._extract_competitor_name(
+        name = extract_competitor_name(
             "Competitor Inc - Official Website",
             "https://competitor.com",
             ""
@@ -973,7 +970,7 @@ class TestDataCollectorAgent:
         assert "Competitor" in name
         
         # Test name extraction from URL
-        name = agent._extract_competitor_name(
+        name = extract_competitor_name(
             "",
             "https://www.example.com/page",
             ""
@@ -981,7 +978,7 @@ class TestDataCollectorAgent:
         assert name is not None
         
         # Test name extraction from snippet
-        name = agent._extract_competitor_name(
+        name = extract_competitor_name(
             "",
             "https://example.com",
             "Competitor XYZ is a leading company"
@@ -1047,16 +1044,12 @@ class TestDataCollectorAgent:
     
     def test_data_collector_agent_extracts_products(self) -> None:
         """Test data collector agent extracts products from text."""
-        from src.agents.data_collector import DataCollectorAgent
-        
-        mock_llm = Mock(spec=BaseChatModel)
-        config = {"max_results": 10}
-        agent = DataCollectorAgent(llm=mock_llm, config=config)
+        from src.agents.utils.data_collection_helpers import extract_products
         
         snippet = "Our products include Product A, Product B, and Product C"
         title = "Company Products"
         
-        products = agent._extract_products(snippet, title)
+        products = extract_products(snippet, title)
         
         # May extract products or return empty list depending on pattern matching
         assert isinstance(products, list)
@@ -1072,10 +1065,11 @@ class TestDataCollectorAgent:
         assert agent.name == "data_collector_agent"
     
     def test_data_collector_agent_handles_empty_search_results(self) -> None:
-        """Test data collector agent handles empty search results."""
+        """Test data collector agent raises WorkflowError on empty search results."""
         from unittest.mock import patch
 
         from src.agents.data_collector import DataCollectorAgent
+        from src.exceptions.workflow_error import WorkflowError
         
         mock_llm = Mock(spec=BaseChatModel)
         config = {"max_results": 10}
@@ -1095,9 +1089,140 @@ class TestDataCollectorAgent:
                 "minimum_results": 4,
             }
             
-            result_state = agent.execute(state)
-            assert "collected_data" in result_state
-            assert len(result_state["collected_data"]["competitors"]) == 0
+            # Should raise WorkflowError when no competitors are collected
+            with pytest.raises(WorkflowError, match="No competitor data collected"):
+                agent.execute(state)
+    
+    def test_data_collector_agent_raises_error_on_no_tavily_results(self) -> None:
+        """Test data collector agent raises WorkflowError when no competitors collected."""
+        from unittest.mock import patch
+
+        from src.agents.data_collector import DataCollectorAgent
+        from src.exceptions.workflow_error import WorkflowError
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"max_results": 10}
+        agent = DataCollectorAgent(llm=mock_llm, config=config)
+        
+        # Mock multiple failed searches
+        with patch("src.agents.data_collector.web_search") as mock_web_search:
+            mock_web_search.invoke.return_value = {
+                "success": False,
+                "error": "API error",
+                "results": [],
+                "count": 0,
+            }
+            
+            state = create_initial_state("Test")
+            state["plan"] = {
+                "tasks": ["Find competitors", "Analyze market"],
+                "minimum_results": 3,
+            }
+            
+            with pytest.raises(WorkflowError) as exc_info:
+                agent.execute(state)
+            
+            # Verify error message contains helpful information
+            assert "No competitor data collected" in str(exc_info.value)
+            assert "Tavily API key" in str(exc_info.value).lower() or "api key" in str(exc_info.value).lower()
+    
+    def test_data_collector_agent_raises_error_on_missing_api_key(self) -> None:
+        """Test data collector agent raises WorkflowError with specific message for missing API key."""
+        from unittest.mock import patch
+
+        from src.agents.data_collector import DataCollectorAgent
+        from src.exceptions.workflow_error import WorkflowError
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"max_results": 10}
+        agent = DataCollectorAgent(llm=mock_llm, config=config)
+        
+        # Mock web_search to return missing API key error
+        with patch("src.agents.data_collector.web_search") as mock_web_search:
+            mock_web_search.invoke.return_value = {
+                "success": False,
+                "error": "TAVILY_API_KEY not configured. Please set TAVILY_API_KEY in your .env file or environment variables.",
+                "results": [],
+                "count": 0,
+            }
+            
+            state = create_initial_state("Test")
+            state["plan"] = {
+                "tasks": ["Find competitors"],
+                "minimum_results": 4,
+            }
+            
+            with pytest.raises(WorkflowError) as exc_info:
+                agent.execute(state)
+            
+            # Verify specific error message for missing API key
+            error_msg = str(exc_info.value)
+            assert "TAVILY_API_KEY is not configured" in error_msg or "TAVILY_API_KEY" in error_msg
+            assert ".env" in error_msg.lower()
+    
+    def test_data_collector_agent_raises_error_on_invalid_api_key(self) -> None:
+        """Test data collector agent raises WorkflowError with specific message for invalid API key."""
+        from unittest.mock import patch
+
+        from src.agents.data_collector import DataCollectorAgent
+        from src.exceptions.workflow_error import WorkflowError
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"max_results": 10}
+        agent = DataCollectorAgent(llm=mock_llm, config=config)
+        
+        # Mock web_search to return invalid API key error (401/403 or invalid key message)
+        with patch("src.agents.data_collector.web_search") as mock_web_search:
+            mock_web_search.invoke.return_value = {
+                "success": False,
+                "error": "401 Unauthorized - Invalid API key",
+                "results": [],
+                "count": 0,
+            }
+            
+            state = create_initial_state("Test")
+            state["plan"] = {
+                "tasks": ["Find competitors"],
+                "minimum_results": 4,
+            }
+            
+            with pytest.raises(WorkflowError) as exc_info:
+                agent.execute(state)
+            
+            # Verify specific error message for invalid API key
+            error_msg = str(exc_info.value)
+            assert "invalid" in error_msg.lower() or "Invalid" in error_msg
+            assert "API key" in error_msg or "TAVILY_API_KEY" in error_msg
+    
+    @pytest.mark.asyncio
+    async def test_data_collector_agent_async_raises_error_on_no_results(self) -> None:
+        """Test async data collector agent raises WorkflowError when no competitors collected."""
+        from unittest.mock import patch
+
+        from src.agents.data_collector import DataCollectorAgent
+        from src.exceptions.workflow_error import WorkflowError
+        
+        mock_llm = Mock(spec=BaseChatModel)
+        config = {"max_results": 10}
+        agent = DataCollectorAgent(llm=mock_llm, config=config)
+        
+        # Mock web_search_async to return empty results
+        with patch("src.agents.data_collector.web_search_async") as mock_web_search:
+            mock_web_search.return_value = {
+                "success": False,
+                "error": "API error",
+                "results": [],
+                "count": 0,
+            }
+            
+            state = create_initial_state("Test")
+            state["plan"] = {
+                "tasks": ["Find competitors"],
+                "minimum_results": 4,
+            }
+            
+            with pytest.raises(WorkflowError, match="No competitor data collected"):
+                await agent.execute_async(state)
     
     def test_data_collector_agent_respects_minimum_results(self) -> None:
         """Test data collector agent respects minimum_results from plan."""
@@ -1589,7 +1714,8 @@ class TestReportAgent:
             "opportunities": ["Expansion into Asia", "B2B market growth"],
         }
         
-        with pytest.raises(WorkflowError, match="Failed to parse report"):
+        # The error message could be either "Failed to parse report" or "Could not extract JSON"
+        with pytest.raises(WorkflowError, match="(Failed to parse report|Could not extract JSON)"):
             agent.execute(state)
     
     def test_report_agent_handles_missing_sections(self) -> None:

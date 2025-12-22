@@ -12,6 +12,7 @@ objects instead of raising exceptions for validation failures.
 import logging
 from typing import Any
 
+from src.config import get_config
 from src.graph.validators.base_validator import BaseValidator, ValidationResult
 
 logger = logging.getLogger(__name__)
@@ -30,37 +31,17 @@ class InsightValidator(BaseValidator):
     - Minimum 3 total insights (SWOT items + trends + opportunities + positioning)
     - Trends are coherent (non-empty, reasonable length)
     - Positioning is present and meaningful
-    
-    Example:
-        ```python
-        from src.graph.validators.insight_validator import InsightValidator
-        
-        validator = InsightValidator()
-        result = validator.validate({
-            "swot": {
-                "strengths": ["Strong brand"],
-                "weaknesses": ["High prices"],
-                "opportunities": ["Emerging markets"],
-                "threats": ["New competitors"]
-            },
-            "positioning": "Premium market leader",
-            "trends": ["Digital transformation"],
-            "opportunities": ["Expansion"]
-        })
-        
-        if result.is_valid:
-            print("Validation passed")
-        else:
-            for error in result.errors:
-                print(f"Error: {error}")
-        ```
     """
     
-    MIN_INSIGHTS = 8  # Minimum 2 per SWOT category (8) + positioning (1) + trends (2) + opportunities (2) = 13 minimum
-    MIN_SWOT_ITEMS_PER_CATEGORY = 2
-    MIN_TRENDS = 2
-    MIN_OPPORTUNITIES = 2
-    MIN_POSITIONING_LENGTH = 50
+    def __init__(self) -> None:
+        """Initialize validator with configuration values."""
+        super().__init__()
+        config = get_config()
+        self.min_insights = config.min_insights
+        self.min_swot_items_per_category = config.min_swot_items_per_category
+        self.min_trends = config.min_trends
+        self.min_opportunities = config.min_opportunities
+        self.min_positioning_length = config.min_positioning_length
     
     def validate(self, data: dict[str, Any]) -> ValidationResult:
         """Validate business insights.
@@ -93,15 +74,8 @@ class InsightValidator(BaseValidator):
             - errors: List of error messages for validation failures
             - warnings: List of warning messages for non-critical issues
             
-        Example:
-            ```python
-            validator = InsightValidator()
-            result = validator.validate(insight_output)
-            
             if not result.is_valid:
                 logger.error(f"Validation failed: {result.get_summary()}")
-                # Handle errors, possibly trigger retry
-            ```
         """
         result = ValidationResult.success()
         
@@ -127,10 +101,10 @@ class InsightValidator(BaseValidator):
             result.add_error("'positioning' field is required and cannot be empty")
         else:
             positioning_length = len(str(positioning).strip())
-            if positioning_length < self.MIN_POSITIONING_LENGTH:
+            if positioning_length < self.min_positioning_length:
                 result.add_error(
                     f"Positioning is too short ({positioning_length} chars). "
-                    f"Minimum {self.MIN_POSITIONING_LENGTH} characters required."
+                    f"Minimum {self.min_positioning_length} characters required."
                 )
             elif positioning_length < 100:
                 result.add_warning(
@@ -144,9 +118,9 @@ class InsightValidator(BaseValidator):
             result.add_error("'trends' field must be a list")
         else:
             non_empty_trends = [t for t in trends if t and str(t).strip()]
-            if len(non_empty_trends) < self.MIN_TRENDS:
+            if len(non_empty_trends) < self.min_trends:
                 result.add_error(
-                    f"Minimum {self.MIN_TRENDS} trends required, found {len(non_empty_trends)}"
+                    f"Minimum {self.min_trends} trends required, found {len(non_empty_trends)}"
                 )
             trend_warnings = self._validate_trends_coherence(trends)
             for warning in trend_warnings:
@@ -158,17 +132,17 @@ class InsightValidator(BaseValidator):
             result.add_error("'opportunities' field must be a list")
         else:
             non_empty_opportunities = [o for o in opportunities if o and str(o).strip()]
-            if len(non_empty_opportunities) < self.MIN_OPPORTUNITIES:
+            if len(non_empty_opportunities) < self.min_opportunities:
                 result.add_error(
-                    f"Minimum {self.MIN_OPPORTUNITIES} opportunities required, "
+                    f"Minimum {self.min_opportunities} opportunities required, "
                     f"found {len(non_empty_opportunities)}"
                 )
         
         # Count total insights
         total_insights = self._count_insights(data)
-        if total_insights < self.MIN_INSIGHTS:
+        if total_insights < self.min_insights:
             result.add_error(
-                f"Minimum {self.MIN_INSIGHTS} insights required, "
+                f"Minimum {self.min_insights} insights required, "
                 f"found {total_insights}. Insights include SWOT items, "
                 "trends, opportunities, and positioning."
             )
@@ -216,10 +190,10 @@ class InsightValidator(BaseValidator):
                 if item and str(item).strip()
             ]
             
-            if len(non_empty_items) < self.MIN_SWOT_ITEMS_PER_CATEGORY:
+            if len(non_empty_items) < self.min_swot_items_per_category:
                 errors.append(
                     f"SWOT '{category}' must have at least "
-                    f"{self.MIN_SWOT_ITEMS_PER_CATEGORY} item(s), "
+                    f"{self.min_swot_items_per_category} item(s), "
                     f"found {len(non_empty_items)}"
                 )
         

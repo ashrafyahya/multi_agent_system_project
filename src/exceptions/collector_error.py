@@ -15,17 +15,6 @@ class CollectorError(BaseWorkflowError):
     such as web search failures, scraping errors, or API call failures.
     It should include context about what was being collected and why
     it failed.
-    
-    Example:
-        ```python
-        try:
-            results = web_search(query)
-        except Exception as e:
-            raise CollectorError(
-                f"Web search failed for query: {query}",
-                context={"query": query, "original_error": str(e)}
-            ) from e
-        ```
     """
     
     pass

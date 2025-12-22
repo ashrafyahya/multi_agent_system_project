@@ -20,6 +20,7 @@ Example:
     ```
 """
 
+import asyncio
 import logging
 from typing import Any
 from urllib.parse import urlparse, urljoin
@@ -33,6 +34,14 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
+from tenacity.asyncio import AsyncRetrying
+
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
+    aiohttp = None  # type: ignore
 
 from src.config import get_config
 from src.exceptions.collector_error import CollectorError
@@ -331,6 +340,197 @@ def scrape_url(url: str, timeout: int = 10) -> dict[str, Any]:
     except Exception as e:
         # Handle unexpected errors
         error_msg = f"Unexpected error during scraping: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        return {
+            "success": False,
+            "error": error_msg,
+            "url": url,
+            "title": "",
+            "content": "",
+            "content_length": 0,
+            "links": [],
+        }
+
+
+async def _fetch_url_content_async(url: str, timeout: int) -> tuple[str, str]:
+    """Fetch content from URL asynchronously with retry logic.
+    
+    This is the async version of _fetch_url_content. It uses aiohttp for
+    non-blocking HTTP requests, allowing multiple URLs to be fetched concurrently.
+    
+    Args:
+        url: URL to fetch
+        timeout: Request timeout in seconds
+        
+    Returns:
+        Tuple of (content_type, content) where content_type is the
+        Content-Type header value and content is the response body
+        
+    Raises:
+        CollectorError: If request fails after all retries
+        aiohttp.ClientError: For HTTP-related errors (will be retried)
+    """
+    if not AIOHTTP_AVAILABLE:
+        # Fall back to sync version in executor
+        logger.warning("aiohttp not available, falling back to sync HTTP requests")
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _fetch_url_content, url, timeout)
+    
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
+        
+        timeout_obj = aiohttp.ClientTimeout(total=timeout)
+        
+        async with aiohttp.ClientSession(timeout=timeout_obj) as session:
+            async with session.get(url, headers=headers, allow_redirects=True) as response:
+                response.raise_for_status()
+                
+                content_type = response.headers.get("Content-Type", "").lower()
+                content = await response.text()
+                
+                return content_type, content
+                
+    except asyncio.TimeoutError as e:
+        logger.warning(f"Timeout fetching URL {url} (attempt will be retried): {e}")
+        raise
+    except aiohttp.ClientError as e:
+        logger.warning(f"Request failed for URL {url} (attempt will be retried): {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error fetching URL {url}: {e}", exc_info=True)
+        raise CollectorError(
+            f"Unexpected error fetching URL: {url}",
+            context={"url": url, "error": str(e)}
+        ) from e
+
+
+async def scrape_url_async(url: str, timeout: int = 10) -> dict[str, Any]:
+    """Scrape text content from a web page URL asynchronously.
+    
+    This is the async version of scrape_url. It fetches a web page and extracts
+    clean, readable text content. Multiple URLs can be scraped concurrently
+    using asyncio.gather().
+    
+    Args:
+        url: URL of the web page to scrape. Must be a valid HTTP/HTTPS URL.
+        timeout: Request timeout in seconds. Default is 10 seconds.
+    
+    Returns:
+        Dictionary with the same structure as scrape_url():
+        {
+            "success": bool,
+            "url": str,
+            "title": str,
+            "content": str,
+            "content_length": int,
+            "links": list[dict],
+            "error": str
+        }
+    
+    Example:
+        ```python
+        # Scrape multiple URLs concurrently
+        urls = ["https://example.com/1", "https://example.com/2"]
+        results = await asyncio.gather(*[
+            scrape_url_async(url, timeout=10)
+            for url in urls
+        ])
+        ```
+    """
+    # Validate inputs (same as sync version)
+    if not url or not url.strip():
+        return {
+            "success": False,
+            "error": "URL cannot be empty",
+            "url": url,
+            "title": "",
+            "content": "",
+            "content_length": 0,
+            "links": [],
+        }
+    
+    url = url.strip()
+    
+    if not _is_valid_url(url):
+        return {
+            "success": False,
+            "error": f"Invalid URL format: {url}",
+            "url": url,
+            "title": "",
+            "content": "",
+            "content_length": 0,
+            "links": [],
+        }
+    
+    # Validate timeout
+    if timeout < 5 or timeout > 30:
+        return {
+            "success": False,
+            "error": f"Timeout must be between 5 and 30 seconds, got {timeout}",
+            "url": url,
+            "title": "",
+            "content": "",
+            "content_length": 0,
+            "links": [],
+        }
+    
+    try:
+        logger.info(f"Scraping URL asynchronously: {url}")
+        
+        # Use async retry logic
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type((asyncio.TimeoutError, aiohttp.ClientError) if AIOHTTP_AVAILABLE else (Exception,)),
+            reraise=True,
+        ):
+            with attempt:
+                content_type, html_content = await _fetch_url_content_async(url, timeout)
+        
+        # Extract text from HTML (CPU-bound, can stay sync)
+        extracted = _extract_text_from_html(html_content, url)
+        
+        content_length = len(extracted["content"])
+        logger.info(
+            f"Successfully scraped URL {url} (async): "
+            f"{content_length} characters, "
+            f"{len(extracted['links'])} links"
+        )
+        
+        return {
+            "success": True,
+            "url": url,
+            "title": extracted["title"],
+            "content": extracted["content"],
+            "content_length": len(extracted["content"]),
+            "links": extracted["links"],
+        }
+        
+    except asyncio.TimeoutError as e:
+        error_msg = f"Timeout fetching URL after retries: {url}"
+        logger.error(error_msg)
+        raise CollectorError(
+            error_msg,
+            context={"url": url, "timeout": timeout, "error": str(e)}
+        ) from e
+    except aiohttp.ClientError as e:
+        error_msg = f"Failed to fetch URL after retries: {url}"
+        logger.error(error_msg)
+        raise CollectorError(
+            error_msg,
+            context={
+                "url": url,
+                "error": str(e),
+                "status_code": getattr(e, "status", None)
+            }
+        ) from e
+    except CollectorError:
+        raise
+    except Exception as e:
+        error_msg = f"Unexpected error during async scraping: {str(e)}"
         logger.error(error_msg, exc_info=True)
         
         return {

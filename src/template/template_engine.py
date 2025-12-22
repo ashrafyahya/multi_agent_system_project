@@ -48,22 +48,6 @@ class PDFTemplateEngine(ABC):
         layout_config: PDF layout configuration (optional)
         report_title: Title of the report
         report_date: Date of the report (defaults to current date)
-    
-    Example:
-        ```python
-        class CustomTemplateEngine(PDFTemplateEngine):
-            def create_cover_page(self) -> list[Any]:
-                # Custom implementation
-                return []
-            
-            def create_header(self, page_num: int, total_pages: int) -> Any:
-                # Custom implementation
-                return None
-            
-            def create_footer(self, page_num: int, total_pages: int) -> Any:
-                # Custom implementation
-                return None
-        ```
     """
     
     def __init__(
@@ -182,25 +166,6 @@ class DefaultPDFTemplateEngine(PDFTemplateEngine):
     
     This implementation delegates to specialized modules for each component,
     following the Single Responsibility Principle.
-    
-    Example:
-        ```python
-        from src.template.template_engine import DefaultPDFTemplateEngine
-        from src.models.pdf_branding_config import PDFBrandingConfig
-        
-        branding = PDFBrandingConfig(
-            company_name="Acme Corp",
-            company_logo_path=Path("./logo.png"),
-            cover_page_template="executive"
-        )
-        
-        engine = DefaultPDFTemplateEngine(
-            branding_config=branding,
-            report_title="Competitor Analysis Report"
-        )
-        
-        cover_page = engine.create_cover_page()
-        ```
     """
     
     def create_cover_page(self) -> list[Any]:

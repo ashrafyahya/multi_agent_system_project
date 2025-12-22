@@ -25,16 +25,6 @@ class ValidationResult(BaseModel):
         is_valid: Boolean indicating whether validation passed
         errors: List of error messages encountered during validation
         warnings: List of warning messages (non-blocking issues)
-    
-    Example:
-        ```python
-        from src.graph.validators.base_validator import ValidationResult
-        
-        result = ValidationResult(is_valid=True)
-        result.add_error("Minimum 4 sources required")
-        assert result.is_valid is False
-        assert len(result.errors) == 1
-        ```
     """
     
     model_config = {"extra": "forbid"}
@@ -63,14 +53,6 @@ class ValidationResult(BaseModel):
         
         Args:
             message: Error message describing the validation failure
-            
-        Example:
-            ```python
-            result = ValidationResult(is_valid=True)
-            result.add_error("Minimum 4 sources required")
-            assert result.is_valid is False
-            assert "Minimum 4 sources required" in result.errors
-            ```
         """
         if message and message.strip():
             self.errors.append(message.strip())
@@ -85,14 +67,6 @@ class ValidationResult(BaseModel):
         
         Args:
             message: Warning message describing a non-blocking issue
-            
-        Example:
-            ```python
-            result = ValidationResult(is_valid=True)
-            result.add_warning("URL format could be improved")
-            assert result.is_valid is True  # Warnings don't affect validity
-            assert "URL format" in result.warnings
-            ```
         """
         if message and message.strip():
             self.warnings.append(message.strip())
@@ -121,16 +95,6 @@ class ValidationResult(BaseModel):
         
         Returns:
             Summary string describing the validation result
-            
-        Example:
-            ```python
-            result = ValidationResult(is_valid=False)
-            result.add_error("Error 1")
-            result.add_error("Error 2")
-            result.add_warning("Warning 1")
-            summary = result.get_summary()
-            # "Validation failed: 2 errors, 1 warning"
-            ```
         """
         error_count = len(self.errors)
         warning_count = len(self.warnings)
@@ -155,13 +119,6 @@ class ValidationResult(BaseModel):
         
         Returns:
             ValidationResult with is_valid=True and empty errors/warnings
-            
-        Example:
-            ```python
-            result = ValidationResult.success()
-            assert result.is_valid is True
-            assert len(result.errors) == 0
-            ```
         """
         return cls(is_valid=True)
     
@@ -177,16 +134,6 @@ class ValidationResult(BaseModel):
             
         Returns:
             ValidationResult with is_valid=False and provided errors
-            
-        Example:
-            ```python
-            result = ValidationResult.failure(
-                "Error 1",
-                "Error 2"
-            )
-            assert result.is_valid is False
-            assert len(result.errors) == 2
-            ```
         """
         result = cls(is_valid=False)
         for message in error_messages:
@@ -206,22 +153,6 @@ class BaseValidator(ABC):
     All validators must implement:
     - validate(): Perform validation and return ValidationResult
     - name: Property returning the validator's name
-    
-    Example:
-        ```python
-        from src.graph.validators.base_validator import BaseValidator, ValidationResult
-        
-        class MyValidator(BaseValidator):
-            @property
-            def name(self) -> str:
-                return "my_validator"
-            
-            def validate(self, data: dict[str, Any]) -> ValidationResult:
-                result = ValidationResult.success()
-                if not data.get("required_field"):
-                    result.add_error("required_field is missing")
-                return result
-        ```
     """
     
     @abstractmethod
@@ -239,17 +170,6 @@ class BaseValidator(ABC):
         
         Returns:
             ValidationResult object with validation status, errors, and warnings
-            
-        Example:
-            ```python
-            validator = MyValidator()
-            result = validator.validate({"field": "value"})
-            if result.is_valid:
-                print("Validation passed")
-            else:
-                for error in result.errors:
-                    print(f"Error: {error}")
-            ```
         """
         pass
     
@@ -260,11 +180,5 @@ class BaseValidator(ABC):
         
         Returns:
             String name of the validator, used for identification and logging
-            
-        Example:
-            ```python
-            validator = MyValidator()
-            assert validator.name == "my_validator"
-            ```
         """
         pass

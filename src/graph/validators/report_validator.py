@@ -12,6 +12,7 @@ objects instead of raising exceptions for validation failures.
 import logging
 from typing import Any
 
+from src.config import get_config
 from src.graph.validators.base_validator import BaseValidator, ValidationResult
 
 logger = logging.getLogger(__name__)
@@ -30,30 +31,14 @@ class ReportValidator(BaseValidator):
     - Each section meets minimum length (50 characters)
     - Total report length meets minimum requirement (default 500 characters)
     - Executive summary exists and is meaningful
-    
-    Example:
-        ```python
-        from src.graph.validators.report_validator import ReportValidator
-        
-        validator = ReportValidator()
-        result = validator.validate({
-            "executive_summary": "Summary of findings...",
-            "swot_breakdown": "SWOT analysis details...",
-            "competitor_overview": "Overview of competitors...",
-            "recommendations": "Strategic recommendations...",
-            "min_length": 500
-        })
-        
-        if result.is_valid:
-            print("Validation passed")
-        else:
-            for error in result.errors:
-                print(f"Error: {error}")
-        ```
     """
     
-    MIN_SECTION_LENGTH = 200  # Minimum for executive summary, others require 300
-    DEFAULT_MIN_TOTAL_LENGTH = 1200
+    def __init__(self) -> None:
+        """Initialize validator with configuration values."""
+        super().__init__()
+        config = get_config()
+        self.min_section_length = 200  # Minimum for executive summary, others require 300
+        self.default_min_total_length = config.min_report_length
     
     REQUIRED_SECTIONS = [
         "executive_summary",
@@ -88,15 +73,6 @@ class ReportValidator(BaseValidator):
             - is_valid: True if all validations pass
             - errors: List of error messages for validation failures
             - warnings: List of warning messages for non-critical issues
-            
-        Example:
-            ```python
-            validator = ReportValidator()
-            result = validator.validate(report_output)
-            
-            if not result.is_valid:
-                logger.error(f"Validation failed: {result.get_summary()}")
-                # Handle errors, possibly trigger retry
             ```
         """
         result = ValidationResult.success()
@@ -121,7 +97,7 @@ class ReportValidator(BaseValidator):
             result.add_error(error)
         
         # Validate total length
-        min_length = data.get("min_length", self.DEFAULT_MIN_TOTAL_LENGTH)
+        min_length = data.get("min_length", self.default_min_total_length)
         total_length = self._calculate_total_length(data)
         
         if total_length < min_length:
@@ -196,7 +172,7 @@ class ReportValidator(BaseValidator):
                 continue
             
             section_length = len(section_content.strip())
-            min_length = section_min_lengths.get(section, self.MIN_SECTION_LENGTH)
+            min_length = section_min_lengths.get(section, self.min_section_length)
             
             if section_length < min_length:
                 errors.append(

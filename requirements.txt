@@ -9,6 +9,9 @@ langchain-groq>=0.2.0
 # LangGraph for agent workflows
 langgraph>=0.2.0
 
+# Observability and monitoring
+langsmith>=0.1.0
+
 # Data validation and models
 pydantic>=2.5.0
 pydantic-settings>=2.1.0

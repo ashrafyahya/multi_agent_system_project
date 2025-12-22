@@ -180,13 +180,6 @@ def _handle_empty_line(
         Tuple of (in_list, list_items, in_table, table_rows) updated state
     """
     if in_list and list_items:
-        # #region agent log
-        import json
-        try:
-            with open(r'c:\Users\dell\Programming\multi_agent_system\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id": f"log_{int(__import__('time').time() * 1000)}", "timestamp": int(__import__('time').time() * 1000), "location": "markdown_parser.py:_handle_empty_line", "message": "Flushing list due to empty line", "data": {"list_type": str(in_list), "list_items_count": len(list_items), "items": [x[:50] for x in list_items]}, "sessionId": "debug-session", "runId": "run1", "hypothesisId": "D"}) + '\n')
-        except: pass
-        # #endregion
         # Check list type and use appropriate formatter
         if in_list == "numbered":
             story.extend(format_numbered_list_items(list_items, styles))
@@ -252,53 +245,6 @@ def _handle_horizontal_rule(
     return in_list, list_items, in_table, table_rows
 
 
-def _handle_strict_table_detection(
-    line_stripped: str,
-    story: list[Any],
-    in_list: bool,
-    list_items: list[str],
-    in_table: bool,
-    table_rows: list[list[str]],
-    styles: Any,
-    branding_config: PDFBrandingConfig | None = None,
-    layout_config: PDFLayoutConfig | None = None,
-) -> tuple[bool, list[str], bool, list[list[str]], bool]:
-    """Handle markdown table line.
-
-    Args:
-        line_stripped: Stripped line to process
-        story: List of flowables to append to
-        in_list: Whether currently in a list
-        list_items: Current list items
-        in_table: Whether currently in a table
-        table_rows: Current table rows
-        styles: ReportLab stylesheet
-        branding_config: Optional PDF branding configuration
-        layout_config: Optional PDF layout configuration
-
-    Returns:
-        Tuple of (in_list, list_items, in_table, table_rows, should_continue)
-    """
-    # Check if it's a table separator line (---)
-    # Separator lines contain mostly dashes, colons, spaces, and pipes
-    # Examples: "| --- | --- |" or "--- | --- | --- |" or "|---|---|---|" or "|:---|:---|:---|"
-    # They typically have at least 3 dashes and multiple pipes
-    if '|' in line_stripped and ('-' in line_stripped or ':' in line_stripped):
-        # Check if line is mostly dashes, colons, spaces, and pipes (separator pattern)
-        # Remove all pipes, dashes, colons, and spaces - if very little remains, it's a separator
-        test_line = re.sub(r'[\|\-\s:]+', '', line_stripped)
-        # If less than 20% of the line is non-separator characters, it's likely a separator
-        if not test_line or len(test_line) < max(3, len(line_stripped) * 0.2):
-            # Line is mostly separator characters - this is a separator line
-            # Skip separator line but stay in table mode
-            return in_list, list_items, in_table, table_rows, True
-
-    # This function is deprecated - strict table detection is now in parse_markdown_to_story
-    # Keep for backward compatibility but mark as deprecated
-    logger.warning("_handle_table_line is deprecated, using strict table detection")
-    return in_list, list_items, in_table, table_rows, False
-
-
 def _handle_heading(
     line_stripped: str,
     story: list[Any],
@@ -327,13 +273,6 @@ def _handle_heading(
     )
     
     if is_heading and in_list and list_items:
-        # #region agent log
-        import json
-        try:
-            with open(r'c:\Users\dell\Programming\multi_agent_system\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id": f"log_{int(__import__('time').time() * 1000)}", "timestamp": int(__import__('time').time() * 1000), "location": "markdown_parser.py:_handle_heading", "message": "Flushing list due to heading", "data": {"list_type": str(in_list), "list_items_count": len(list_items), "items": [x[:50] for x in list_items], "heading": line_stripped[:50]}, "sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "E"}) + '\n')
-        except: pass
-        # #endregion
         # Check list type and use appropriate formatter
         if in_list == "numbered":
             story.extend(format_numbered_list_items(list_items, styles))
@@ -545,18 +484,19 @@ def _handle_list_item(
         Tuple of (in_list, list_items, should_continue)
         in_list is now a string: "bullet", "numbered", or False
     """
-    # #region agent log
-    import json
-    try:
-        with open(r'c:\Users\dell\Programming\multi_agent_system\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"id": f"log_{int(__import__('time').time() * 1000)}", "timestamp": int(__import__('time').time() * 1000), "location": "markdown_parser.py:_handle_list_item", "message": "Processing list item", "data": {"line": line_stripped[:100], "in_list": str(in_list), "list_items_count": len(list_items), "is_numbered": is_numbered_list_item(line_stripped)}, "sessionId": "debug-session", "runId": "run1", "hypothesisId": "A"}) + '\n')
-    except: pass
-    # #endregion
     
     # Handle unordered lists (-, *, •)
     if line_stripped.startswith(("- ", "* ", "• ")):
         in_list = "bullet"
         list_item = line_stripped[2:].strip()
+        # Remove trailing "-" if present (common issue from LLM formatting)
+        # Pattern: "Item text [1] -" or "Item text -"
+        while list_item.rstrip().endswith(' -'):
+            list_item = list_item.rstrip()[:-2].rstrip()
+        if list_item.rstrip().endswith('-') and len(list_item.rstrip()) > 1:
+            # Only remove if preceded by space (not part of citation like "[1]-")
+            if list_item.rstrip()[-2] == ' ':
+                list_item = list_item.rstrip()[:-1].rstrip()
         list_item = convert_markdown_to_html(list_item)
         if list_item:
             list_items.append(list_item)
@@ -571,12 +511,6 @@ def _handle_list_item(
             list_item = convert_markdown_to_html(list_item)
             if list_item:
                 list_items.append(list_item)
-                # #region agent log
-                try:
-                    with open(r'c:\Users\dell\Programming\multi_agent_system\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                        f.write(json.dumps({"id": f"log_{int(__import__('time').time() * 1000)}", "timestamp": int(__import__('time').time() * 1000), "location": "markdown_parser.py:_handle_list_item", "message": "Added numbered list item", "data": {"item": list_item[:100], "list_items_count": len(list_items), "all_items": [x[:50] for x in list_items]}, "sessionId": "debug-session", "runId": "run1", "hypothesisId": "A"}) + '\n')
-                except: pass
-                # #endregion
         return in_list, list_items, True
 
     return in_list, list_items, False
@@ -882,6 +816,14 @@ def _handle_paragraph(
             for item in items:
                 item = item.strip()
                 if item and len(item) > 5:  # Minimum length check
+                    # Remove trailing "-" if present (common issue from LLM formatting)
+                    original_item = item
+                    while item.rstrip().endswith(' -'):
+                        item = item.rstrip()[:-2].rstrip()
+                    if item.rstrip().endswith('-') and len(item.rstrip()) > 1:
+                        # Only remove if preceded by space (not part of citation like "[1]-")
+                        if item.rstrip()[-2] == ' ':
+                            item = item.rstrip()[:-1].rstrip()
                     item_html = convert_markdown_to_html(item)
                     story.append(Paragraph(f"• {item_html}", styles["Normal"]))
                     story.append(Spacer(1, 0.08 * inch))
@@ -1296,13 +1238,6 @@ def parse_markdown_to_story(
 
     # Handle trailing list or table
     if in_list and list_items:
-        # #region agent log
-        import json
-        try:
-            with open(r'c:\Users\dell\Programming\multi_agent_system\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id": f"log_{int(__import__('time').time() * 1000)}", "timestamp": int(__import__('time').time() * 1000), "location": "markdown_parser.py:parse_markdown_to_story", "message": "Flushing trailing list", "data": {"list_type": str(in_list), "list_items_count": len(list_items), "items": [x[:50] for x in list_items]}, "sessionId": "debug-session", "runId": "run1", "hypothesisId": "A"}) + '\n')
-        except: pass
-        # #endregion
         # Check list type and use appropriate formatter
         if in_list == "numbered":
             story.extend(format_numbered_list_items(list_items, styles))

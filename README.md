@@ -1,10 +1,12 @@
 # Competitor Analysis Multi-Agent System
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 A robust, scalable multi-agent system using LangGraph for automated competitor analysis with validation gates, retry mechanisms, and quality assurance.
+
+<img src="./images/market_entry_analysis.png" width="800" height="600" alt="Market Entry Analysis">
 
 ## Overview
 
@@ -15,15 +17,15 @@ This system leverages multiple AI agents working together to perform comprehensi
 3. **Data Collector Agent**: Gathers competitor data using web search and scraping
 4. **Insight Agent**: Transforms raw data into business insights and SWOT analysis
 5. **Report Agent**: Generates comprehensive formatted reports
-6. **Export Agent**: Exports reports to PDF and generates visualizations (SWOT diagrams, charts)
+6. **Export Agent**: Exports reports to PDF
 
 The system uses LangGraph to orchestrate these agents through a stateful workflow with validation gates at each stage and automatic retry mechanisms for error recovery.
 
 ## Features
 
 - 🤖 **Multi-Agent Architecture**: Specialized agents for each workflow stage
-- 🔄 **Retry Logic**: Automatic retry with exponential backoff for transient failures
-- ✅ **Validation Gates**: Quality checks at each workflow stage
+- 🔄 **Intelligent Retry Logic**: LLM-powered query improvement based on validation errors with automatic fallback
+- ✅ **Validation Gates**: Quality checks at each workflow stage with immutable state management
 - 📊 **Structured Output**: Pydantic models ensure type safety and validation
 - 📄 **Professional PDF Export**: Advanced PDF generation with branding, layout customization, and professional features
   - Custom branding (logos, colors, fonts)
@@ -31,9 +33,17 @@ The system uses LangGraph to orchestrate these agents through a stateful workflo
   - Branded headers and footers
   - PDF metadata and bookmarks
   - Flexible page layouts (size, orientation, margins)
-- 📈 **Visualizations**: SWOT diagrams, trends charts, opportunities charts, and advanced competitor comparisons
-- 🛡️ **Error Handling**: Comprehensive error handling with custom exception hierarchy
-- 📝 **Comprehensive Testing**: Unit and integration tests with 80%+ coverage
+- 🛡️ **Error Handling**: Comprehensive error handling with decorator-based approach and custom exception hierarchy
+- 🚀 **Performance Optimizations**:
+  - **LLM Response Caching**: In-memory caching to reduce redundant API calls
+  - **Rate Limiting**: Automatic retry with exponential backoff for LLM API calls
+  - **Async Support**: Hybrid async/sync execution for I/O-bound operations
+  - **State Compression**: External storage for large state data to keep state size manageable
+  - **Parallel Test Execution**: Fast test runs with pytest-xdist
+- 📊 **Monitoring & Metrics**: Detailed tracking of execution time, token usage, and API calls
+- 🔍 **LangSmith Observability**: Optional integration with LangSmith for tracing, debugging, and monitoring LLM calls and agent operations
+- 🔒 **Security**: Input validation and sanitization to prevent security issues
+- 📝 **Comprehensive Testing**: Unit and integration tests with 80%+ coverage, parallel execution support
 - 🔧 **Type Safety**: Full type hints throughout the codebase
 - 📚 **Well Documented**: Google-style docstrings with usage examples
 - 📋 **Agent Output Logging**: Automatic logging of agent outputs to timestamped files for debugging and analysis
@@ -57,6 +67,7 @@ The system uses LangGraph to orchestrate these agents through a stateful workflo
 - Python 3.10 or higher
 - Groq API key (for LLM)
 - Optional: Tavily API key (for enhanced web search)
+- Optional: LangSmith API key (for observability and tracing)
 
 ### Setup
 
@@ -94,7 +105,27 @@ The system uses LangGraph to orchestrate these agents through a stateful workflo
    MAX_RETRIES=3
    LOG_LEVEL=INFO
    DATA_DIR=./data
-   TAVILY_API_KEY=your_tavily_api_key_here 
+   TAVILY_API_KEY=your_tavily_api_key_here
+   
+   # Performance & Quality Configuration
+   LLM_CACHE_ENABLED=true
+   LLM_CACHE_SIZE=128
+   METRICS_ENABLED=true
+   METRICS_EXPORT_PATH=./data/metrics
+   USE_ASYNC=false
+   INTELLIGENT_RETRY_ENABLED=true
+   STATE_STORAGE_ENABLED=false
+   STATE_STORAGE_TTL=86400
+   
+   # Input Validation
+   MAX_QUERY_LENGTH=5000
+   MIN_QUERY_LENGTH=10
+   
+   # LangSmith Observability (Optional)
+   LANGSMITH_ENABLED=false
+   LANGSMITH_API_KEY=your_langsmith_api_key_here
+   LANGSMITH_PROJECT=multi-agent-system
+   # LANGSMITH_ENDPOINT=https://api.smith.langchain.com  # Optional: custom endpoint
    ```
 
 ## Configuration
@@ -109,18 +140,15 @@ The application uses a centralized `Config` class that:
 - Provides type-safe access to configuration values
 - Validates configuration on load
 
-**Accessing Configuration:**
-```python
-from src.config import get_config
-
-config = get_config()
-api_key = config.groq_api_key  # Type-safe access
-max_retries = config.max_retries
-```
 
 ### Required Configuration
 
 - `GROQ_API_KEY`: Your Groq API key (required)
+  - Must be set in `.env` file or environment variables
+  - Automatically loaded by the configuration system
+
+- `TAVILY_API_KEY`: Tavily API key for web search (required)
+  - Required for competitor data collection
   - Must be set in `.env` file or environment variables
   - Automatically loaded by the configuration system
 
@@ -136,11 +164,143 @@ max_retries = config.max_retries
 - `MAX_RETRIES`: Maximum retry attempts (default: 3, range: 1-10)
 - `LOG_LEVEL`: Logging level (default: `INFO`, options: DEBUG, INFO, WARNING, ERROR, CRITICAL)
 - `DATA_DIR`: Directory for temporary data (default: `./data`)
-- `TAVILY_API_KEY`: Tavily API key for enhanced web search (optional)
 - `AGENT_LOG_DIR`: Directory for agent output log files (default: `./data/agent_logs`)
 - `AGENT_LOG_ENABLED`: Enable/disable agent output logging (default: `true`)
-  - Automatically loaded from `.env` file or environment variables
-  - Accessed via `config.tavily_api_key` in code
+- `LANGSMITH_ENABLED`: Enable/disable LangSmith tracing (default: `false`)
+- `LANGSMITH_API_KEY`: LangSmith API key for authentication (optional, required if `LANGSMITH_ENABLED=true`)
+- `LANGSMITH_PROJECT`: LangSmith project name for organizing traces (default: `multi-agent-system`)
+- `LANGSMITH_ENDPOINT`: Custom LangSmith endpoint URL (optional, for self-hosted LangSmith)
+
+### Validation Thresholds Configuration
+
+The system provides configurable validation thresholds for quality control at each workflow stage. These can be adjusted via environment variables:
+
+- `MIN_INSIGHTS`: Minimum number of total insights required (default: `8`, range: 1-100)
+  - Includes SWOT items, trends, opportunities, and positioning
+- `MIN_POSITIONING_LENGTH`: Minimum character length for positioning statement (default: `50`, range: 10-1000)
+- `MIN_REPORT_LENGTH`: Minimum total character length for report (default: `1200`, range: 100-100000)
+- `MIN_SWOT_ITEMS_PER_CATEGORY`: Minimum items per SWOT category (default: `2`, range: 1-50)
+  - Applies to strengths, weaknesses, opportunities, and threats
+- `MIN_TRENDS`: Minimum number of trends required (default: `2`, range: 1-50)
+- `MIN_OPPORTUNITIES`: Minimum number of opportunities required beyond SWOT (default: `2`, range: 1-50)
+- `MIN_COLLECTOR_SOURCES`: Minimum number of unique competitor sources (default: `4`, range: 1-100)
+
+**Example Configuration:**
+```env
+MIN_INSIGHTS=10
+MIN_POSITIONING_LENGTH=100
+MIN_REPORT_LENGTH=2000
+MIN_SWOT_ITEMS_PER_CATEGORY=3
+MIN_TRENDS=3
+MIN_OPPORTUNITIES=3
+MIN_COLLECTOR_SOURCES=5
+```
+
+These thresholds ensure quality standards are met at each validation stage. Adjust them based on your specific requirements.
+
+### Rate Limiting and Retry Configuration
+
+The system includes automatic rate limiting and retry logic for LLM API calls to handle rate limits and transient failures gracefully:
+
+- `LLM_RETRY_ATTEMPTS`: Maximum number of retry attempts for LLM API calls (default: `3`, range: 1-10)
+- `LLM_RETRY_BACKOFF_MIN`: Minimum backoff time in seconds for exponential backoff (default: `1.0`, range: 0.1-60.0)
+- `LLM_RETRY_BACKOFF_MAX`: Maximum backoff time in seconds for exponential backoff (default: `30.0`, range: 1.0-300.0)
+- `INTELLIGENT_RETRY_ENABLED`: Enable/disable intelligent retry using LLM to improve queries (default: `true`)
+
+**Example Configuration:**
+```env
+LLM_RETRY_ATTEMPTS=5
+LLM_RETRY_BACKOFF_MIN=2.0
+LLM_RETRY_BACKOFF_MAX=60.0
+INTELLIGENT_RETRY_ENABLED=true
+```
+
+The rate limiter automatically:
+- Detects rate limit errors (HTTP 429, quota exceeded, etc.)
+- Retries with exponential backoff
+- Logs retry attempts for debugging
+- Raises WorkflowError after max retries exceeded
+- Uses intelligent retry (LLM-powered query improvement) when enabled
+
+All LLM calls are automatically wrapped with retry logic and caching, so you don't need to modify agent code.
+
+### LLM Caching Configuration
+
+The system includes in-memory caching for LLM responses to reduce redundant API calls:
+
+- `LLM_CACHE_ENABLED`: Enable/disable LLM response caching (default: `true`)
+- `LLM_CACHE_SIZE`: Maximum number of cached responses (default: `128`, range: 1-10000)
+
+**Example Configuration:**
+```env
+LLM_CACHE_ENABLED=true
+LLM_CACHE_SIZE=256
+```
+
+The cache automatically:
+- Caches responses based on message content and parameters
+- Provides cache statistics (hits, misses, size)
+- Supports cache invalidation
+- Reduces API costs and improves performance
+
+### Metrics and Monitoring Configuration
+
+The system tracks detailed metrics for performance monitoring:
+
+- `METRICS_ENABLED`: Enable/disable metrics tracking (default: `true`)
+- `METRICS_EXPORT_PATH`: Directory for exporting metrics data (default: `./data/metrics`)
+
+**Example Configuration:**
+```env
+METRICS_ENABLED=true
+METRICS_EXPORT_PATH=./data/metrics
+```
+
+Metrics tracked include:
+- Execution time for nodes and agents
+- Token usage from LLM calls
+- API call counts
+- Success/failure rates
+
+Metrics are automatically exported to JSON files after workflow completion.
+
+### Async Operations Configuration
+
+The system supports async execution for I/O-bound operations:
+
+- `USE_ASYNC`: Enable/disable async execution (default: `false`)
+
+**Example Configuration:**
+```env
+USE_ASYNC=true
+```
+
+When enabled:
+- LLM calls use async versions (`ainvoke`)
+- Web searches run in parallel
+- URL scraping runs in parallel
+- Significantly improves performance for multiple operations
+
+### State Storage Configuration
+
+The system can store large state data externally to keep state size manageable:
+
+- `STATE_STORAGE_ENABLED`: Enable/disable external storage (default: `false`)
+- `STATE_STORAGE_DIR`: Directory for storing large data (default: `./data/state_storage`)
+- `STATE_STORAGE_TTL`: Time to live in seconds (default: `86400` = 24 hours, range: 60-604800)
+
+**Example Configuration:**
+```env
+STATE_STORAGE_ENABLED=true
+STATE_STORAGE_DIR=./data/state_storage
+STATE_STORAGE_TTL=86400
+```
+
+When enabled:
+- Large fields (report, collected_data, insights) are stored externally
+- State contains references instead of full data
+- Automatic cleanup of old data based on TTL
+- Reduces memory usage and improves performance
 
 ### Flexible Model Configuration
 
@@ -159,6 +319,42 @@ This allows you to:
 - Use different models for different agents (set agent-specific `LLM_MODEL_*` variables)
 - Change models anytime by updating `.env` file - no code changes needed
 
+### LangSmith Observability
+
+The system supports integration with [LangSmith](https://smith.langchain.com/) for tracing, debugging, and monitoring LLM calls and agent operations.
+
+![](./images/LangSmith.jpg)  
+
+**To enable LangSmith:**
+
+1. **Get a LangSmith API key**: Sign up at [smith.langchain.com](https://smith.langchain.com/) and get your API key
+
+2. **Configure in `.env` file**:
+   ```env
+   LANGSMITH_ENABLED=true
+   LANGSMITH_API_KEY=your_langsmith_api_key_here
+   LANGSMITH_PROJECT=multi-agent-system
+   ```
+
+3. **Optional: Custom endpoint** (for self-hosted LangSmith):
+   ```env
+   LANGSMITH_ENDPOINT=https://your-custom-endpoint.com
+   ```
+
+**What gets traced:**
+- All LLM calls (requests, responses, tokens, latency)
+- Agent operations and state transitions
+- Workflow execution flow
+- Error traces and retry attempts
+
+**Benefits:**
+- **Debugging**: See exactly what each agent is doing and why
+- **Performance**: Monitor token usage, latency, and costs
+- **Quality**: Track validation failures and retry patterns
+- **Optimization**: Identify bottlenecks and optimize agent prompts
+
+LangSmith integration is automatic once enabled - all LangChain operations will be traced without any code changes.
+
 ## Usage
 
 ### Command-Line Interface
@@ -174,7 +370,7 @@ python -m src.main --verbose "Compare pricing strategies of top 5 competitors"
 
 ### PDF Export Configuration
 
-The system supports professional PDF generation with customizable branding and layout.
+The system supports professional PDF generation with customizable branding and layout. See [PDF Configuration Examples](docs/pdf_configuration_examples.md) for detailed documentation.
 
 
 **PDF Features:**
@@ -184,6 +380,82 @@ The system supports professional PDF generation with customizable branding and l
 - **Custom Branding**: Company logos, colors, fonts
 - **Flexible Layout**: Page size, orientation, margins, columns
 
+For more examples and detailed configuration options, see [PDF Configuration Examples](docs/pdf_configuration_examples.md).
+
+## Advanced Features
+
+### LLM Response Caching
+
+The system includes intelligent caching for LLM responses to reduce API costs and improve performance:
+
+```python
+from src.utils.llm_cache import get_cache_stats, clear_cache
+
+# Check cache statistics
+stats = get_cache_stats()
+print(f"Cache hits: {stats['hits']}, misses: {stats['misses']}")
+
+# Clear cache if needed
+clear_cache()
+```
+
+Caching is automatically enabled and integrated with rate limiting. Responses are cached based on message content and parameters.
+
+### Metrics and Monitoring
+
+The system tracks detailed performance metrics:
+
+```python
+from src.utils.metrics import get_metrics_collector
+
+collector = get_metrics_collector()
+stats = collector.get_aggregated_metrics()
+print(f"Total execution time: {stats.total_execution_time}s")
+print(f"Total API calls: {stats.total_api_calls}")
+```
+
+Metrics are automatically exported to JSON files after workflow completion when `METRICS_ENABLED=true`.
+
+### Async Operations
+
+Enable async execution for improved performance with multiple I/O operations:
+
+```python
+# In your code, use async versions when enabled
+if config.use_async:
+    results = await asyncio.gather(*[
+        web_search_async(query) for query in queries
+    ])
+```
+
+Async support is available for:
+- LLM API calls (`invoke_llm_async`)
+- Web search (`web_search_async`)
+- URL scraping (`scrape_url_async`)
+- Data collection (parallel searches and scrapes)
+
+### State Storage
+
+Store large state data externally to reduce memory usage:
+
+```python
+from src.graph.state_utils import update_state_with_storage, retrieve_state_data
+
+# Automatically stores large data when enabled
+state = update_state_with_storage(state, report=large_report)
+
+# Automatically retrieves stored data
+report = retrieve_state_data(state, "report")
+```
+
+### Intelligent Retry
+
+The retry system uses LLM to analyze validation errors and improve queries:
+
+- Analyzes validation errors to understand issues
+- Generates improved queries that address the problems
+- Falls back to rule-based enhancement if LLM is unavailable
+- Configurable via `INTELLIGENT_RETRY_ENABLED`
 
 ## Project Structure
 
@@ -200,7 +472,16 @@ multi_agent_system/
 │   │   ├── data_collector.py   # Data collection
 │   │   ├── insight_agent.py    # Insight generation
 │   │   ├── report_agent.py     # Report generation
-│   │   └── export_agent.py      # PDF export and visualizations
+│   │   ├── export_agent.py     # PDF export
+│   │   ├── prompts/            # Agent prompt templates
+│   │   │   ├── __init__.py
+│   │   │   ├── planner_agent_prompts.py
+│   │   │   ├── insight_agent_prompts.py
+│   │   │   └── report_agent_prompts.py
+│   │   └── utils/              # Agent utility functions
+│   │       ├── __init__.py
+│   │       ├── data_collection_helpers.py
+│   │       └── report_parser.py
 │   │
 │   ├── template/               # PDF template utilities
 │   │   ├── template_engine.py  # PDF template engine
@@ -208,8 +489,8 @@ multi_agent_system/
 │   │   ├── pdf_formatter.py    # PDF formatting utilities
 │   │   ├── markdown_parser.py  # Markdown parsing
 │   │   ├── markdown_converter.py # Markdown to PDF conversion
-│   │   ├── cover_page.py        # Cover page generation
-│   │   ├── header_footer.py     # Header and footer utilities
+│   │   ├── cover_page.py       # Cover page generation
+│   │   ├── header_footer.py    # Header and footer utilities
 │   │   ├── pdf_styles.py       # PDF styling utilities
 │   │   ├── pdf_utils.py        # PDF utility functions
 │   │   └── style_utils.py      # Style utility functions
@@ -217,7 +498,9 @@ multi_agent_system/
 │   ├── graph/                  # Workflow components
 │   │   ├── workflow.py         # LangGraph workflow builder
 │   │   ├── state.py            # WorkflowState TypedDict
+│   │   ├── state_utils.py      # Immutable state update helpers
 │   │   ├── nodes/              # Pure function nodes
+│   │   │   ├── base_node.py   # Base node with error handling decorator
 │   │   │   ├── planner_node.py
 │   │   │   ├── supervisor_node.py
 │   │   │   ├── data_collector_node.py
@@ -232,14 +515,14 @@ multi_agent_system/
 │   │       ├── insight_validator.py
 │   │       └── report_validator.py
 │   │
-│   ├── tools/                   # Stateless tools
+│   ├── tools/                  # Stateless tools
 │   │   ├── base_tool.py        # Base tool class
 │   │   ├── web_search.py       # Web search tool
 │   │   ├── scraper.py          # Web scraping tool
-│   │   ├── query_generator.py   # Query optimization
+│   │   ├── query_generator.py  # Query optimization
 │   │   └── text_utils.py       # Text processing utilities
 │   │
-│   ├── models/                  # Pydantic data models
+│   ├── models/                 # Pydantic data models
 │   │   ├── plan_model.py       # Execution plan model
 │   │   ├── competitor_profile.py # Competitor data model
 │   │   ├── insight_model.py    # Business insights model
@@ -248,7 +531,12 @@ multi_agent_system/
 │   │   └── pdf_layout_config.py   # PDF layout configuration
 │   │
 │   ├── utils/                   # Utility modules
-│   │   └── agent_logger.py      # Agent output logging utility
+│   │   ├── agent_logger.py      # Agent output logging utility
+│   │   ├── input_validator.py   # Input validation and sanitization
+│   │   ├── llm_cache.py         # LLM response caching
+│   │   ├── rate_limiter.py      # Rate limiting and retry logic
+│   │   ├── metrics.py           # Performance metrics tracking
+│   │   └── state_storage.py     # External storage for large state data
 │   │
 │   └── exceptions/              # Custom exception hierarchy
 │       ├── base.py              # Base exception class
@@ -256,16 +544,26 @@ multi_agent_system/
 │       ├── validation_error.py  # Validation exceptions
 │       └── workflow_error.py    # Workflow exceptions
 │
-├── tests/                       # Test suite
+├── tests/                      # Test suite
 │   ├── conftest.py             # Pytest configuration and fixtures
 │   ├── test_agents.py          # Agent tests
 │   ├── test_agent_logger.py    # Agent logger tests
+│   ├── test_async_agents.py    # Async agent tests
+│   ├── test_base_node.py       # Base node tests
 │   ├── test_config.py          # Configuration tests
+│   ├── test_data_collection_helpers.py # Data collection helper tests
 │   ├── test_exceptions.py      # Exception tests
-│   ├── test_main.py           # Main entry point tests
+│   ├── test_input_validator.py # Input validation tests
+│   ├── test_llm_cache.py       # LLM caching tests
+│   ├── test_main.py            # Main entry point tests
+│   ├── test_metrics.py         # Metrics tracking tests
 │   ├── test_models.py          # Model tests
 │   ├── test_nodes.py           # Node tests
+│   ├── test_rate_limiter.py    # Rate limiter tests
+│   ├── test_report_parser.py   # Report parser tests
 │   ├── test_state.py           # State management tests
+│   ├── test_state_storage.py   # State storage tests
+│   ├── test_state_utils.py     # State utility tests
 │   ├── test_template.py        # Template tests
 │   ├── test_tools.py           # Tool tests
 │   ├── test_validators.py      # Validator tests
@@ -276,11 +574,12 @@ multi_agent_system/
 │       ├── test_full_workflow.py # Full workflow integration tests
 │       └── test_pdf_export.py   # PDF export integration tests
 │
-├── docs/                       # Documentation
-│   └── pdf_configuration_examples.md # PDF configuration guide
+├── images/                     # Project images and diagrams
+│
 ├── requirements.txt            # Python dependencies
 ├── pyproject.toml              # Project configuration
 ├── Makefile                    # Development commands
+├── LICENSE.txt                 # License file
 └── README.md                   # This file
 ```
 
@@ -292,12 +591,22 @@ multi_agent_system/
 # Run all tests
 pytest tests/ -v
 
+# Run tests in parallel (recommended for faster execution)
+pytest -n auto -v
+
 # Run with coverage
-pytest tests/ -v --cov=src --cov-report=html
+pytest -n auto -v --cov=src --cov-report=html
 
 # Run specific test file
 pytest tests/test_agents.py -v
+
+# Run specific test file in parallel
+pytest -n auto tests/test_agents.py -v
 ```
+
+**Parallel Test Execution**: The project supports parallel test execution using `pytest-xdist`. See [Parallel Test Execution Guide](docs/README_PARALLEL.md) for detailed documentation.
+
+**Performance**: Parallel execution can reduce test time from ~76 seconds to ~15-25 seconds depending on CPU cores.
 
 ### Code Quality Checks
 
@@ -324,20 +633,23 @@ All agents follow the Agent Pattern:
 - **Stateless**: State passed in, not stored
 - **Dependency Injection**: LLM and config injected via constructor
 - **Communication**: Through state objects, not direct method calls
+- **Async Support**: Optional async execution for I/O-bound operations
 
 ### Node Pattern
 
 All nodes are pure functions:
 - **Pure Functions**: `State -> State` with no side effects
 - **Wrappers**: Wrap agent execution
-- **Error Handling**: Graceful error handling
+- **Error Handling**: Decorator-based consistent error handling
+- **Metrics Tracking**: Automatic execution time and token usage tracking
 
 ### Validator Pattern
 
 All validators follow the Validator Pattern:
 - **Composable**: Return `ValidationResult` objects
 - **Non-throwing**: Don't raise exceptions for business rule violations
-- **Structured**: Return errors and warnings
+- **Structured**: Return errors and warnings separately
+- **Immutable**: Never mutate input state (warnings stored separately)
 
 ### Tool Pattern
 
@@ -345,6 +657,24 @@ All tools are stateless functions:
 - **Stateless**: No internal state
 - **Decorated**: Use `@tool` decorator from LangChain
 - **Structured Output**: Return dictionaries with success/error information
+- **Async Support**: Optional async versions for parallel execution
+
+### State Management Pattern
+
+State updates follow immutability principles:
+- **Immutable Updates**: Helper functions create new state objects
+- **Deep Copying**: Nested structures are deep copied to prevent mutations
+- **External Storage**: Large data can be stored externally when enabled
+- **Reference Handling**: Automatic resolution of storage references
+
+### Performance Patterns
+
+The system includes several performance optimizations:
+- **Caching**: LLM responses cached to reduce API calls
+- **Rate Limiting**: Automatic retry with exponential backoff
+- **Async Operations**: Parallel execution for I/O-bound tasks
+- **State Compression**: External storage for large data
+- **Metrics Tracking**: Performance monitoring and export
 
 ## Workflow Flow
 
@@ -362,7 +692,7 @@ All tools are stateless functions:
 8. **Report Agent** → Generates formatted report
    - Output logged to `report_agent_YYYYMMDD_HHMMSS.log`
 9. **Report Validator** → Validates report completeness
-10. **Export Agent** → Generates PDF and visualizations
+10. **Export Agent** → Generates PDF
     - Output logged to `export_agent_YYYYMMDD_HHMMSS.log`
 11. **Final Report + Exports** → Returned to user
 
@@ -393,11 +723,18 @@ The project includes comprehensive test coverage:
 - **Unit Tests**: Test individual components in isolation
 - **Integration Tests**: Test complete workflow execution
 - **Coverage**: 80%+ code coverage requirement
+- **Parallel Execution**: Fast test runs with pytest-xdist
 
 Run tests:
 ```bash
+# Sequential execution
 pytest tests/ -v --cov=src --cov-report=term-missing
+
+# Parallel execution (recommended)
+pytest -n auto -v --cov=src --cov-report=term-missing
 ```
+
+See [Parallel Test Execution Guide](docs/README_PARALLEL.md) for detailed documentation on running tests in parallel.
 
 ## Troubleshooting
 
@@ -426,6 +763,21 @@ pytest tests/ -v --cov=src --cov-report=term-missing
 - **Solution**: Check that `AGENT_LOG_ENABLED=true` in `.env` and that `AGENT_LOG_DIR` is writable
 - The log directory is automatically created if it doesn't exist
 - Verify the path is correct and has write permissions
+
+**Issue**: Tests are slow
+- **Solution**: Use parallel test execution: `pytest -n auto`
+- Install pytest-xdist: `pip install pytest-xdist`
+- See [Parallel Test Execution Guide](docs/README_PARALLEL.md) for details
+
+**Issue**: High memory usage with large reports
+- **Solution**: Enable state storage: `STATE_STORAGE_ENABLED=true`
+- Large data will be stored externally, reducing memory usage
+- Configure TTL: `STATE_STORAGE_TTL=86400` (24 hours)
+
+**Issue**: Too many LLM API calls
+- **Solution**: Ensure caching is enabled: `LLM_CACHE_ENABLED=true`
+- Check cache statistics: `from src.utils.llm_cache import get_cache_stats`
+- Increase cache size if needed: `LLM_CACHE_SIZE=256`
 
 ### Agent Output Logging
 
@@ -466,7 +818,47 @@ Or set `LOG_LEVEL=DEBUG` in `.env` file.
 
 ## Version History
 
-### Version 2.0.0 (Current)
+### Version 2.1.0 (Current)
+
+**Major Updates:**
+- ✨ **Code Quality Improvements**: Comprehensive improvements from implementation plan (Tasks 1-12)
+- 🚀 **Performance Optimizations**: LLM caching, async support, state compression, and parallel test execution
+- 📊 **Monitoring & Metrics**: Detailed metrics tracking for execution time, token usage, and API calls
+- 🔍 **LangSmith Observability**: Optional integration with LangSmith for tracing and debugging
+- 🔒 **Security Enhancements**: Input validation and sanitization utilities
+- 🔄 **Intelligent Retry**: LLM-powered query improvement based on validation errors
+- 🛡️ **State Management**: Immutable state updates with helper functions
+- 📝 **Enhanced Documentation**: Comprehensive documentation with all new features
+
+**New Features:**
+- **LLM Response Caching**: In-memory caching to reduce redundant API calls (configurable)
+- **Rate Limiting**: Automatic retry with exponential backoff for LLM API calls
+- **Metrics Tracking**: Execution time, token usage, and API call tracking with export
+- **LangSmith Observability**: Optional integration with LangSmith for tracing, debugging, and monitoring LLM calls and agent operations
+- **Async Support**: Hybrid async/sync execution for I/O-bound operations (web search, scraping)
+- **State Compression**: External storage for large state data to keep state size manageable
+- **Intelligent Retry**: LLM analyzes validation errors and improves queries automatically
+- **Input Validation**: Security-focused input validation and sanitization
+- **Immutable State Management**: Helper functions for safe state updates
+- **Parallel Test Execution**: Fast test runs with pytest-xdist support
+- **Validator Pattern Improvements**: No state pollution, warnings returned separately
+
+**Configuration Additions:**
+- `LLM_CACHE_ENABLED`, `LLM_CACHE_SIZE` - LLM caching configuration
+- `METRICS_ENABLED`, `METRICS_EXPORT_PATH` - Metrics tracking configuration
+- `USE_ASYNC` - Async operations configuration
+- `INTELLIGENT_RETRY_ENABLED` - Intelligent retry configuration
+- `STATE_STORAGE_ENABLED`, `STATE_STORAGE_DIR`, `STATE_STORAGE_TTL` - State storage configuration
+- `MAX_QUERY_LENGTH`, `MIN_QUERY_LENGTH` - Input validation configuration
+- `LANGSMITH_ENABLED`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT` - LangSmith observability configuration
+
+**Architecture Improvements:**
+- Decorator-based error handling for consistent error management
+- Immutable state updates prevent accidental mutations
+- Thread-safe metrics collection and state storage
+- Graceful fallbacks for async operations when not supported
+
+### Version 2.0.0
 
 **Major Updates:**
 - ✨ **Agent Output Logging**: Added comprehensive agent output logging system with timestamped log files
@@ -478,7 +870,7 @@ Or set `LOG_LEVEL=DEBUG` in `.env` file.
 **Key Features:**
 - Automatic agent output logging to timestamped files (`./data/agent_logs/`)
 - Tiered model configuration for optimal performance and cost
-- Enhanced PDF export with improved formatting and visualizations
+- Enhanced PDF export with improved formatting
 - Comprehensive test coverage (80%+)
 - Full type safety with type hints throughout
 
@@ -499,11 +891,13 @@ Or set `LOG_LEVEL=DEBUG` in `.env` file.
 
 ## Contributing
 
-1. Ensure all tests pass: `pytest tests/ -v`
+1. Ensure all tests pass: `pytest -n auto tests/ -v` (use parallel execution for faster feedback)
 2. Run code quality checks: `make lint`
 3. Maintain 80%+ test coverage
 4. Follow Google-style docstrings
 5. Use type hints for all functions
+6. Follow SOLID principles and project rules (see `project_rules.md`)
+7. Update documentation when adding new features
 
 ## License
 

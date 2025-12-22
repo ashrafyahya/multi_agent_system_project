@@ -2,15 +2,6 @@
 
 This module handles environment variable loading and provides type-safe
 configuration access using Pydantic models.
-
-Example:
-    ```python
-    from src.config import get_config
-    
-    config = get_config()
-    api_key = config.groq_api_key
-    max_retries = config.max_retries
-    ```
 """
 
 from pathlib import Path
@@ -35,7 +26,7 @@ class Config(BaseSettings):
         data_dir: Directory for storing temporary data and downloads
         max_retries: Maximum number of retry attempts for failed operations
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        tavily_api_key: Optional API key for Tavily search service
+        tavily_api_key: API key for Tavily search service (required)
         llm_model: Default LLM model name for all agents (fallback)
         llm_model_planner: Model for Planner agent (optional)
         llm_model_supervisor: Model for Supervisor agent (optional)
@@ -45,16 +36,23 @@ class Config(BaseSettings):
         llm_model_export: Model for Export agent (optional)
         agent_log_dir: Directory for storing agent output log files
         agent_log_enabled: Enable/disable agent output logging (default: True)
-    
-    Example:
-        ```python
-        from src.config import get_config
-        
-        config = get_config()
-        # API keys are automatically loaded from .env file or environment
-        api_key = config.groq_api_key
-        tavily_key = config.tavily_api_key
-        ```
+        min_insights: Minimum number of total insights required (default: 8)
+        min_positioning_length: Minimum character length for positioning (default: 50)
+        min_report_length: Minimum total character length for report (default: 1200)
+        min_swot_items_per_category: Minimum items per SWOT category (default: 2)
+        min_trends: Minimum number of trends required (default: 2)
+        min_opportunities: Minimum number of opportunities required (default: 2)
+        min_collector_sources: Minimum number of unique competitor sources (default: 4)
+        llm_retry_attempts: Maximum retry attempts for LLM API calls (default: 3)
+        llm_retry_backoff_min: Minimum backoff time in seconds (default: 1.0)
+        llm_retry_backoff_max: Maximum backoff time in seconds (default: 30.0)
+        max_query_length: Maximum character length for user queries (default: 5000)
+        min_query_length: Minimum character length for user queries (default: 10)
+        llm_cache_enabled: Enable/disable in-memory caching for LLM responses (default: True)
+        llm_cache_size: Maximum number of cached LLM responses (default: 128)
+        metrics_enabled: Enable/disable metrics tracking (default: True)
+        metrics_export_path: Directory path for exporting metrics data (default: ./data/metrics)
+        use_async: Enable/disable async execution for I/O operations (default: False)
     """
     
     model_config = SettingsConfigDict(
@@ -87,9 +85,10 @@ class Config(BaseSettings):
         description="Logging level",
     )
     
-    tavily_api_key: Optional[str] = Field(
-        default=None,
-        description="Optional Tavily API key for web search",
+    tavily_api_key: str = Field(
+        ...,
+        description="Tavily API key for web search (required)",
+        min_length=1,
     )
     
     llm_model: str = Field(
@@ -137,6 +136,175 @@ class Config(BaseSettings):
         description="Enable/disable agent output logging",
     )
     
+    # Validation thresholds
+    min_insights: int = Field(
+        default=8,
+        description="Minimum number of total insights required (SWOT items + trends + opportunities + positioning)",
+        ge=1,
+        le=100,
+    )
+    
+    min_positioning_length: int = Field(
+        default=50,
+        description="Minimum character length for positioning statement",
+        ge=10,
+        le=1000,
+    )
+    
+    min_report_length: int = Field(
+        default=1200,
+        description="Minimum total character length for report",
+        ge=100,
+        le=100000,
+    )
+    
+    min_swot_items_per_category: int = Field(
+        default=2,
+        description="Minimum number of items required per SWOT category (strengths, weaknesses, opportunities, threats)",
+        ge=1,
+        le=50,
+    )
+    
+    min_trends: int = Field(
+        default=2,
+        description="Minimum number of trends required",
+        ge=1,
+        le=50,
+    )
+    
+    min_opportunities: int = Field(
+        default=2,
+        description="Minimum number of opportunities required (beyond SWOT)",
+        ge=1,
+        le=50,
+    )
+    
+    min_collector_sources: int = Field(
+        default=4,
+        description="Minimum number of unique competitor sources required",
+        ge=1,
+        le=100,
+    )
+    
+    # Rate limiting and retry configuration
+    llm_retry_attempts: int = Field(
+        default=3,
+        description="Maximum number of retry attempts for LLM API calls",
+        ge=1,
+        le=10,
+    )
+    
+    llm_retry_backoff_min: float = Field(
+        default=1.0,
+        description="Minimum backoff time in seconds for exponential backoff",
+        ge=0.1,
+        le=60.0,
+    )
+    
+    llm_retry_backoff_max: float = Field(
+        default=30.0,
+        description="Maximum backoff time in seconds for exponential backoff",
+        ge=1.0,
+        le=300.0,
+    )
+    
+    # Input validation configuration
+    max_query_length: int = Field(
+        default=5000,
+        description="Maximum character length for user queries",
+        ge=100,
+        le=50000,
+    )
+    
+    min_query_length: int = Field(
+        default=10,
+        description="Minimum character length for user queries",
+        ge=1,
+        le=1000,
+    )
+    
+    # LLM caching configuration
+    llm_cache_enabled: bool = Field(
+        default=True,
+        description="Enable/disable in-memory caching for LLM responses",
+    )
+    
+    llm_cache_size: int = Field(
+        default=128,
+        description="Maximum number of cached LLM responses (LRU cache size)",
+        ge=1,
+        le=10000,
+    )
+    
+    # Metrics configuration
+    metrics_enabled: bool = Field(
+        default=True,
+        description="Enable/disable metrics tracking for execution time, token usage, and API calls",
+    )
+    
+    metrics_export_path: Path = Field(
+        default=Path("./data/metrics"),
+        description="Directory path for exporting metrics data (JSON files)",
+    )
+    
+    # Async operations configuration
+    use_async: bool = Field(
+        default=False,
+        description="Enable/disable async execution for I/O-bound operations (LLM calls, web requests). When enabled, agents and tools will use async versions for parallel execution.",
+    )
+    
+    # Retry logic configuration
+    intelligent_retry_enabled: bool = Field(
+        default=True,
+        description="Enable/disable intelligent retry using LLM to analyze validation errors and improve queries. When disabled, uses simple rule-based query enhancement.",
+    )
+    
+    # State storage configuration
+    state_storage_enabled: bool = Field(
+        default=False,
+        description="Enable/disable external storage for large state data (reports, collected data). When enabled, large data is stored externally and state contains references.",
+    )
+    
+    state_storage_dir: Path = Field(
+        default=Path("./data/state_storage"),
+        description="Directory for storing large state data externally",
+    )
+    
+    state_storage_ttl: int = Field(
+        default=86400,
+        description="Time to live for stored state data in seconds (default: 24 hours). Data older than TTL is automatically cleaned up.",
+        ge=60,  # Minimum 1 minute
+        le=604800,  # Maximum 7 days
+    )
+    
+    # LangSmith observability configuration
+    langsmith_enabled: bool = Field(
+        default=False,
+        description="Enable/disable LangSmith tracing and observability. When enabled, all LLM calls and agent operations will be traced to LangSmith.",
+    )
+    
+    langsmith_api_key: Optional[str] = Field(
+        default=None,
+        description="LangSmith API key for authentication. Required if langsmith_enabled is True.",
+    )
+    
+    langsmith_project: Optional[str] = Field(
+        default="multi-agent-system",
+        description="LangSmith project name for organizing traces. All traces will be grouped under this project name.",
+    )
+    
+    langsmith_endpoint: Optional[str] = Field(
+        default=None,
+        description="Custom LangSmith endpoint URL. If not provided, uses default LangSmith cloud endpoint.",
+    )
+    
+    @field_validator("state_storage_dir", mode="after")
+    @classmethod
+    def validate_state_storage_dir(cls, value: Path) -> Path:
+        """Ensure state_storage_dir is a Path object."""
+        # Directory will be created when storage is actually used
+        return value
+    
     def get_model_for_agent(self, agent_name: str) -> str:
         """Get the model name for a specific agent.
         
@@ -150,13 +318,6 @@ class Config(BaseSettings):
         
         Returns:
             Model name string for the agent as configured in environment variables
-        
-        Example:
-            ```python
-            config = get_config()
-            planner_model = config.get_model_for_agent("planner")
-            insight_model = config.get_model_for_agent("insight")
-            ```
         """
         # Normalize agent name to lowercase
         agent_name_lower = agent_name.lower()
@@ -240,6 +401,21 @@ class Config(BaseSettings):
         path = Path(value)
         path.mkdir(parents=True, exist_ok=True)
         return path
+    
+    @field_validator("metrics_export_path", mode="before")
+    @classmethod
+    def validate_metrics_export_path(cls, value: str | Path) -> Path:
+        """Convert metrics_export_path to Path object and create if needed.
+        
+        Args:
+            value: Metrics export directory path as string or Path
+            
+        Returns:
+            Path object for metrics export directory
+        """
+        path = Path(value)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
 
 # Global configuration instance
@@ -263,16 +439,6 @@ def get_config() -> Config:
         
     Raises:
         ValueError: If required configuration values are missing or invalid
-        
-    Example:
-        ```python
-        from src.config import get_config
-        
-        config = get_config()
-        # Access API keys (automatically loaded from .env or environment)
-        groq_key = config.groq_api_key
-        tavily_key = config.tavily_api_key  # May be None if not set
-        ```
     """
     import logging
     logger = logging.getLogger(__name__)

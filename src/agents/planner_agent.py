@@ -3,26 +3,6 @@
 This module implements the PlannerAgent that breaks down user requests into
 actionable tasks and generates execution plans. It uses LLM with structured
 output to generate Plan models.
-
-Example:
-    ```python
-    from src.agents.planner_agent import PlannerAgent
-    from langchain_groq import ChatGroq
-    from src.graph.state import create_initial_state
-    
-    from src.config import get_config
-    from src.main import initialize_llms_for_agents
-    
-    config = get_config()
-    agent_llms = initialize_llms_for_agents(config)
-    llm = agent_llms["planner"]
-    agent_config = {"temperature": 0}
-    agent = PlannerAgent(llm=llm, config=agent_config)
-    
-    state = create_initial_state("Analyze competitors in SaaS market")
-    updated_state = agent.execute(state)
-    plan = updated_state["plan"]
-    ```
 """
 
 import json
@@ -34,10 +14,13 @@ from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import ValidationError
 
-from src.agents.base_agent import BaseAgent
+from src.agents.base_agent import BaseAgent, agent_error_handler
+from src.agents.prompts.planner_agent_prompts import SYSTEM_PROMPT
 from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState
+from src.graph.state_utils import update_state
 from src.models.plan_model import Plan
+from src.utils.metrics import track_execution_time
 
 logger = logging.getLogger(__name__)
 
@@ -59,72 +42,8 @@ class PlannerAgent(BaseAgent):
         llm: Language model instance (injected)
         config: Configuration dictionary (injected)
     """
-    
-    SYSTEM_PROMPT = """You are an expert strategic planning consultant specializing in competitive intelligence and market analysis.
 
-Your role is to transform business requests into actionable, data-driven execution plans for comprehensive competitor analysis.
-
-**Core Principles:**
-- Prioritize actionable, measurable tasks that lead to strategic insights
-- Consider industry context, market dynamics, and business objectives
-- Balance comprehensiveness with efficiency
-- Focus on data quality over quantity
-
-**When analyzing a user request, create a strategic execution plan:**
-
-1. **Tasks** (3-8 specific, prioritized tasks):
-   - Start with market/industry context gathering
-   - Focus on direct competitors first, then indirect competitors
-   - Include quantitative data collection (pricing, market share, revenue, user metrics)
-   - Cover product/service features, positioning, and go-to-market strategies
-   - Consider recent news, funding, partnerships, and strategic moves
-   - Tasks should be SMART: Specific, Measurable, Achievable, Relevant, Time-bound
-   - Example: "Collect pricing tiers and feature comparison for top 5 SaaS competitors in the CRM space"
-
-2. **Preferred Sources** (prioritized list):
-   - Primary: Official websites, product pages, pricing pages, investor relations
-   - Secondary: Industry reports (Gartner, Forrester, IDC), market research firms
-   - Tertiary: News articles, press releases, social media, review sites (G2, Capterra)
-   - Consider: Financial filings (for public companies), patent databases, job postings
-   - Specify: "official website", "industry reports", "news articles", "review platforms", "financial filings"
-
-3. **Minimum Results** (intelligent determination):
-   - Base minimum: 4-6 competitors for comprehensive analysis
-   - Adjust based on request scope:
-     * Narrow market/niche: 3-5 competitors
-     * Broad market: 6-10 competitors
-     * Enterprise/strategic analysis: 8-12 competitors
-   - Consider market concentration (oligopoly vs. fragmented market)
-
-4. **Search Strategy** (context-aware selection):
-   - "comprehensive": Use for strategic planning, market entry, investment decisions
-     * Broad market coverage, multiple data sources, deep analysis
-   - "focused": Use for quick competitive checks, feature comparisons, pricing analysis
-     * Targeted search, specific competitors, time-sensitive decisions
-   - Choose based on: request urgency, decision timeline, analysis depth needed
-
-**Output Format:**
-Return ONLY a valid JSON object with this exact structure (no markdown, no explanations):
-{{
-    "tasks": ["task1", "task2", "task3"],
-    "preferred_sources": ["source1", "source2"],
-    "minimum_results": 4,
-    "search_strategy": "comprehensive"
-}}
-
-**Quality Requirements:**
-- All tasks must be actionable and specific
-- Minimum 3 tasks, maximum 8 tasks
-- At least 3 different source types
-- minimum_results must be between 3 and 15
-- search_strategy must be exactly "comprehensive" or "focused"
-- JSON must be valid and parseable
-
-**Error Prevention:**
-- If request is ambiguous, infer reasonable scope based on context
-- If industry is unclear, include tasks to identify market segment
-- Always include at least one quantitative data collection task"""
-
+    @track_execution_time("planner_agent")
     def execute(self, state: WorkflowState) -> WorkflowState:
         """Generate execution plan from user request.
         
@@ -173,9 +92,11 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
                     context={"validation_errors": str(e), "plan_data": plan_data}
                 ) from e
             
-            new_state = state.copy()
-            new_state["plan"] = plan_dict
-            new_state["current_task"] = "Planning completed"
+            new_state = update_state(
+                state,
+                plan=plan_dict,
+                current_task="Planning completed"
+            )
             
             logger.info(
                 f"Plan generated successfully: {len(plan_dict.get('tasks', []))} tasks, "
@@ -225,6 +146,7 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
         
         return ""
     
+    @agent_error_handler("planner_agent", "plan")
     def _generate_plan(self, user_request: str) -> dict[str, Any]:
         """Generate plan using LLM.
         
@@ -241,34 +163,24 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
             WorkflowError: If LLM invocation fails or response cannot be parsed
         
         """
-        try:
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", self.SYSTEM_PROMPT),
-                ("human", user_request)
-            ])
-            
-            messages = prompt.format_messages()
-            response = self.llm.invoke(messages)
-            
-            content = response.content if hasattr(response, "content") else str(response)
-            
-            if not content:
-                raise WorkflowError("LLM returned empty response")
-            
-            logger.debug(f"LLM response: {content[:200]}...")
-            
-            plan_data = self._parse_plan_response(content)
-            
-            return plan_data
-            
-        except WorkflowError:
-            raise
-        except Exception as e:
-            logger.error(f"Error generating plan: {e}", exc_info=True)
-            raise WorkflowError(
-                "Failed to generate plan from LLM",
-                context={"error": str(e), "user_request": user_request[:100]}
-            ) from e
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", SYSTEM_PROMPT),
+            ("human", user_request)
+        ])
+        
+        messages = prompt.format_messages()
+        response = self.invoke_llm(messages)
+        
+        content = response.content if hasattr(response, "content") else str(response)
+        
+        if not content:
+            raise WorkflowError("LLM returned empty response")
+        
+        logger.debug(f"LLM response: {content[:200]}...")
+        
+        plan_data = self._parse_plan_response(content)
+        
+        return plan_data
     
     def _parse_plan_response(self, content: str) -> dict[str, Any]:
         """Parse LLM response into plan dictionary.

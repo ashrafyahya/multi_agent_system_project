@@ -31,6 +31,14 @@ def format_list_items(items: list[str], styles: Any) -> list[Any]:
 
     flowables = []
     for item in items:
+        # Remove trailing "-" if present (common issue from LLM formatting)
+        # This is a safety net in case trailing "-" weren't removed earlier
+        while item.rstrip().endswith(' -'):
+            item = item.rstrip()[:-2].rstrip()
+        if item.rstrip().endswith('-') and len(item.rstrip()) > 1:
+            # Only remove if preceded by space (not part of citation like "[1]-")
+            if item.rstrip()[-2] == ' ':
+                item = item.rstrip()[:-1].rstrip()
         # Use bullet style for list items
         flowables.append(Paragraph(f"• {item}", styles["Normal"]))
         flowables.append(Spacer(1, 0.08 * inch))
@@ -49,13 +57,6 @@ def format_numbered_list_items(items: list[str], styles: Any) -> list[Any]:
     Returns:
         List of reportlab flowables (Paragraphs and Spacers)
     """
-    # #region agent log
-    import json
-    try:
-        with open(r'c:\Users\dell\Programming\multi_agent_system\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"id": f"log_{int(__import__('time').time() * 1000)}", "timestamp": int(__import__('time').time() * 1000), "location": "pdf_formatter.py:format_numbered_list_items", "message": "Formatting numbered list", "data": {"items_count": len(items), "items": [x[:50] for x in items]}, "sessionId": "debug-session", "runId": "run1", "hypothesisId": "C"}) + '\n')
-    except: pass
-    # #endregion
     from reportlab.lib.units import inch
     from reportlab.platypus import Paragraph, Spacer
 
@@ -63,12 +64,6 @@ def format_numbered_list_items(items: list[str], styles: Any) -> list[Any]:
     for idx, item in enumerate(items, start=1):
         # Use numbered format: "1. item", "2. item", etc.
         formatted_text = f"{idx}. {item}"
-        # #region agent log
-        try:
-            with open(r'c:\Users\dell\Programming\multi_agent_system\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"id": f"log_{int(__import__('time').time() * 1000)}", "timestamp": int(__import__('time').time() * 1000), "location": "pdf_formatter.py:format_numbered_list_items", "message": "Creating paragraph", "data": {"idx": idx, "formatted_text": formatted_text[:100]}, "sessionId": "debug-session", "runId": "run1", "hypothesisId": "C"}) + '\n')
-        except: pass
-        # #endregion
         flowables.append(Paragraph(formatted_text, styles["Normal"]))
         flowables.append(Spacer(1, 0.08 * inch))
     # Add spacing after list

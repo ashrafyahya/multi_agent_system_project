@@ -10,6 +10,7 @@ from typing import Any, Literal
 from src.agents.base_agent import BaseAgent
 from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState
+from src.graph.state_utils import update_state
 from src.graph.validators.collector_validator import CollectorValidator
 from src.graph.validators.insight_validator import InsightValidator
 from src.graph.validators.report_validator import ReportValidator
@@ -73,9 +74,9 @@ class SupervisorAgent(BaseAgent):
             WorkflowError: If workflow state is invalid or supervisor logic fails
         """
         try:
-            new_state = state.copy()
-            if "validation_errors" not in new_state:
-                new_state["validation_errors"] = []
+            # Ensure validation_errors exists in state
+            validation_errors = state.get("validation_errors", [])
+            new_state = update_state(state, validation_errors=validation_errors)
             max_retries = self.config.get("max_retries", 3)
             current_retry_count = state.get("retry_count", 0)
             

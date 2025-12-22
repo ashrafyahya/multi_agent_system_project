@@ -50,16 +50,6 @@ class BaseTool(ABC):
         Raises:
             CollectorError: If tool execution fails critically and cannot
                 be represented in the return value
-                
-        Example:
-            ```python
-            tool = MyTool()
-            result = tool.execute(query="test", max_results=10)
-            if result["success"]:
-                data = result["data"]
-            else:
-                error = result["error"]
-            ```
         """
         pass
     

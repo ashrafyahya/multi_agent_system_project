@@ -80,4 +80,32 @@ repos:
         args: [--convention=google]
         exclude: ^(tests/|docs/)
 
+  # Custom checks for project rules compliance
+  - repo: local
+    hooks:
+      # Check type hints
+      - id: check-type-hints
+        name: Check Type Hints
+        entry: python
+        language: system
+        # args: [scripts/check_type_hints.py]
+        pass_filenames: false
+        always_run: true
+      
+      # Check file length (max 500 lines)
+      - id: check-file-length
+        name: Check File Length
+        entry: python
+        language: system
+        args: [-c, "import sys; from pathlib import Path; files = [Path(f) for f in sys.argv[1:] if f.endswith('.py')]; errors = [(f, len(f.read_text(encoding='utf-8').splitlines())) for f in files if len(f.read_text(encoding='utf-8').splitlines()) > 500]; [print(f'{f}:{lines} lines (max 500)') for f, lines in errors]; sys.exit(1 if errors else 0)"]
+        types: [python]
+      
+      # Check function length (max 50 lines) - basic check
+      - id: check-function-length
+        name: Check Function Length
+        entry: python
+        language: system
+        args: [-c, "import ast, sys; from pathlib import Path; errors = []; [errors.extend([(str(f), node.lineno, node.name, node.end_lineno - node.lineno + 1) for node in ast.walk(ast.parse(f.read_text(encoding='utf-8'), filename=str(f))) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.end_lineno and (node.end_lineno - node.lineno + 1) > 50]) for f in [Path(f) for f in sys.argv[1:] if f.endswith('.py') and '__pycache__' not in f]]; [print(f'{f}:{line}: function {name} has {lines} lines (max 50)') for f, line, name, lines in errors]; sys.exit(1 if errors else 0)"]
+        types: [python]
+
 

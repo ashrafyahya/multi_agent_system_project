@@ -14,11 +14,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import ValidationError
 
-from src.agents.base_agent import BaseAgent
+from src.agents.base_agent import BaseAgent, agent_error_handler
+from src.agents.prompts.insight_agent_prompts import SYSTEM_PROMPT
 from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState
+from src.graph.state_utils import update_state
 from src.models.competitor_profile import CompetitorProfile
 from src.models.insight_model import SWOT, Insight
+from src.utils.metrics import track_execution_time
 
 logger = logging.getLogger(__name__)
 
@@ -40,89 +43,8 @@ class InsightAgent(BaseAgent):
         config: Configuration dictionary (injected)
     
     """
-    
-    SYSTEM_PROMPT = """You are a senior business intelligence analyst and competitive strategist with expertise in market analysis, strategic planning, and competitive intelligence.
 
-Your task is to transform raw competitor data into actionable, strategic business insights that drive decision-making.
-
-**Analysis Framework:**
-
-1. **SWOT Analysis** (Comprehensive, data-driven):
-   - **Strengths**: Identify competitive advantages, market leadership, unique capabilities
-     * Include quantitative evidence: market share %, revenue figures, user base, growth rates
-     * Focus on sustainable competitive advantages, not temporary wins
-     * Example: "Market leader with 35% market share and $2B annual revenue"
-   
-   - **Weaknesses**: Identify vulnerabilities, gaps, and limitations
-     * Include specific pain points, feature gaps, pricing issues, market position weaknesses
-     * Consider customer complaints, negative reviews, churn indicators
-     * Example: "Limited international presence (only 15% revenue from outside US)"
-   
-   - **Opportunities**: Market opportunities and growth potential
-     * Emerging markets, underserved segments, technology trends, partnership opportunities
-     * Include market size estimates, growth projections when available
-     * Example: "Untapped SMB market segment worth $500M growing at 25% YoY"
-   
-   - **Threats**: Competitive threats and market risks
-     * New entrants, disruptive technologies, market shifts, regulatory changes
-     * Include impact assessment when possible
-     * Example: "Emerging AI-powered competitors gaining 10% market share annually"
-
-2. **Market Positioning** (Strategic positioning analysis):
-   - Analyze how each competitor positions itself (premium, value, niche, mass market)
-   - Identify positioning strategies: differentiation, cost leadership, focus
-   - Include target customer segments and value propositions
-   - Describe competitive positioning relative to market (leader, challenger, follower, nicher)
-   - **CRITICAL**: Must be between 50 and 500 characters (strict limit)
-   - Be concise and strategic - summarize key positioning insights in 2-4 sentences
-   - Focus on the most important positioning aspects, not exhaustive details
-
-3. **Market Trends** (Data-driven trend identification):
-   - Identify macro trends: technology shifts, consumer behavior changes, regulatory impacts
-   - Identify industry-specific trends: pricing models, feature evolution, go-to-market strategies
-   - Include quantitative indicators when available (growth rates, adoption metrics)
-   - Focus on actionable trends that inform strategy
-   - Example: "Shift to usage-based pricing (40% of competitors adopting in last 2 years)"
-
-4. **Business Opportunities** (Actionable opportunities):
-   - Market gaps and white spaces competitors are not addressing
-   - Underserved customer segments or use cases
-   - Technology or feature opportunities
-   - Partnership or acquisition opportunities
-   - Pricing or business model innovations
-   - Prioritize by market size, growth potential, and strategic fit
-
-**Output Requirements:**
-
-Return your analysis as a valid JSON object with this exact structure:
-{{
-    "swot": {{
-        "strengths": ["strength1 with quantitative data", "strength2", ...],
-        "weaknesses": ["weakness1 with specific details", "weakness2", ...],
-        "opportunities": ["opportunity1 with market size", "opportunity2", ...],
-        "threats": ["threat1 with impact", "threat2", ...]
-    }},
-    "positioning": "Detailed market positioning analysis (minimum 50 characters)",
-    "trends": ["trend1 with data", "trend2", ...],
-    "opportunities": ["opportunity1 prioritized", "opportunity2", ...]
-}}
-
-**Quality Standards:**
-- Each SWOT category: minimum 2 items, maximum 10 items
-- Include quantitative data (percentages, dollar amounts, metrics) in at least 30% of SWOT items
-- **Positioning: STRICT LIMIT - minimum 50 characters, maximum 500 characters (will be truncated if exceeded)**
-- Trends: minimum 2 trends, maximum 8 trends
-- Opportunities: minimum 2 opportunities, maximum 8 opportunities
-- All insights must be specific, actionable, and data-driven
-- Avoid generic statements; use concrete examples and numbers
-- Prioritize insights by strategic importance and data quality
-
-**Best Practices:**
-- Cross-reference multiple data points to validate insights
-- Distinguish between facts (from data) and inferences (your analysis)
-- Focus on insights that inform strategic decisions
-- Consider both short-term tactical and long-term strategic implications"""
-
+    @track_execution_time("insight_agent")
     def execute(self, state: WorkflowState) -> WorkflowState:
         """Execute insight generation from collected data.
         
@@ -180,9 +102,11 @@ Return your analysis as a valid JSON object with this exact structure:
                 ) from e
             
             # Update state
-            new_state = state.copy()
-            new_state["insights"] = insight_dict
-            new_state["current_task"] = "Insights generated successfully"
+            new_state = update_state(
+                state,
+                insights=insight_dict,
+                current_task="Insights generated successfully"
+            )
             
             # Log insight generation result
             strengths_count = len(insight_dict.get('swot', {}).get('strengths', []))
@@ -204,6 +128,7 @@ Return your analysis as a valid JSON object with this exact structure:
                 context={"error": str(e)}
             ) from e
     
+    @agent_error_handler("insight_agent", "insights")
     def _generate_insights(self, competitors_data: list[dict[str, Any]]) -> dict[str, Any]:
         """Generate insights from competitor data using LLM.
         
@@ -216,36 +141,27 @@ Return your analysis as a valid JSON object with this exact structure:
         Raises:
             WorkflowError: If LLM invocation fails or response cannot be parsed
         """
-        try:
-            competitor_summary = self._prepare_competitor_summary(competitors_data)
-            
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", self.SYSTEM_PROMPT),
-                ("human", competitor_summary)
-            ])
-            
-            messages = prompt.format_messages()
-            response = self.llm.invoke(messages)
-            
-            content = response.content if hasattr(response, "content") else str(response)
-            
-            if not content:
-                raise WorkflowError("LLM returned empty response")
-            
-            logger.debug(f"LLM response: {content[:200]}...")
-            
-            insight_data = self._parse_insight_response(content)
-            
-            return insight_data
-            
-        except WorkflowError:
-            raise
-        except Exception as e:
-            logger.error(f"Error generating insights: {e}", exc_info=True)
-            raise WorkflowError(
-                "Failed to generate insights from LLM",
-                context={"error": str(e), "competitors_count": len(competitors_data)}
-            ) from e
+        competitor_summary = self._prepare_competitor_summary(competitors_data)
+        
+        # Use HumanMessage and SystemMessage directly to avoid template parsing issues
+        # when competitor_summary contains curly braces (e.g., JSON data)
+        messages = [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=competitor_summary)
+        ]
+        
+        response = self.invoke_llm(messages)
+        
+        content = response.content if hasattr(response, "content") else str(response)
+        
+        if not content:
+            raise WorkflowError("LLM returned empty response")
+        
+        logger.debug(f"LLM response: {content[:200]}...")
+        
+        insight_data = self._parse_insight_response(content)
+        
+        return insight_data
     
     def _prepare_competitor_summary(self, competitors_data: list[dict[str, Any]]) -> str:
         """Prepare competitor data summary for LLM analysis.
@@ -286,40 +202,67 @@ Return your analysis as a valid JSON object with this exact structure:
         
         Returns a basic insight structure that explains the data collection
         issue, allowing the workflow to continue and generate a report.
-        Ensures all validation requirements are met (minimum 1 item per SWOT category,
-        minimum 3 total insights).
+        Ensures all validation requirements are met based on configuration
+        (minimum items per SWOT category, minimum trends, minimum opportunities).
         
         Returns:
             Dictionary containing minimal insight data
         """
+        # Get minimum requirements from config to ensure we meet validation
+        from src.config import get_config
+        config = get_config()
+        min_swot = config.min_swot_items_per_category
+        min_trends = config.min_trends
+        min_opportunities = config.min_opportunities
+        
+        # Generate items to meet minimum requirements
+        # Base items - ensure we have at least min_swot items per category
+        strengths_pool = [
+            "Data collection infrastructure is in place and functional",
+            "System architecture supports multiple data sources and search strategies",
+            "Modular design allows for easy integration of new data sources"
+        ]
+        weaknesses_pool = [
+            "Unable to collect competitor data due to missing API keys or search failures",
+            "Limited data availability prevents comprehensive competitive analysis",
+            "Search queries may not be optimized for the target market segment"
+        ]
+        opportunities_swot_pool = [
+            "Improve data collection strategy to gather competitor information",
+            "Review search queries and data sources for better results",
+            "Implement alternative data collection methods and sources"
+        ]
+        threats_pool = [
+            "Unable to assess competitive landscape due to insufficient data",
+            "Missing competitive intelligence may lead to strategic blind spots",
+            "Incomplete market analysis could result in suboptimal business decisions"
+        ]
+        trends_pool = [
+            "Data collection challenges may indicate need for improved search strategies",
+            "Market analysis requires reliable data sources and robust collection mechanisms",
+            "Industry trends suggest increasing importance of competitive intelligence"
+        ]
+        opportunities_pool = [
+            "Enhance data collection methodology",
+            "Review and refine search queries",
+            "Consider alternative data sources",
+            "Implement automated data validation and quality checks"
+        ]
+        
+        # Return items up to the minimum required (we have enough items in each pool)
         return {
             "swot": {
-                "strengths": [
-                    "Data collection infrastructure is in place and functional"
-                ],
-                "weaknesses": [
-                    "Unable to collect competitor data due to missing API keys or search failures"
-                ],
-                "opportunities": [
-                    "Improve data collection strategy to gather competitor information",
-                    "Review search queries and data sources for better results"
-                ],
-                "threats": [
-                    "Unable to assess competitive landscape due to insufficient data"
-                ]
+                "strengths": strengths_pool[:min_swot],
+                "weaknesses": weaknesses_pool[:min_swot],
+                "opportunities": opportunities_swot_pool[:min_swot],
+                "threats": threats_pool[:min_swot]
             },
             "positioning": (
                 "Unable to determine market positioning due to lack of competitor data. "
                 "Data collection process should be reviewed to ensure adequate information gathering."
             ),
-            "trends": [
-                "Data collection challenges may indicate need for improved search strategies"
-            ],
-            "opportunities": [
-                "Enhance data collection methodology",
-                "Review and refine search queries",
-                "Consider alternative data sources"
-            ]
+            "trends": trends_pool[:min_trends],
+            "opportunities": opportunities_pool[:min_opportunities]
         }
     
     def _parse_insight_response(self, content: str) -> dict[str, Any]:

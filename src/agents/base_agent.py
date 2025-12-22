@@ -10,12 +10,104 @@ The Agent Pattern ensures that:
 - Dependencies (LLM, config) are injected, not created internally
 """
 
+import asyncio
+import logging
 from abc import ABC, abstractmethod
-from typing import Any
+from functools import wraps
+from typing import Any, Callable, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 
+from src.config import get_config
+from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState
+from src.utils.rate_limiter import invoke_llm_with_retry, invoke_llm_with_retry_async
+
+logger = logging.getLogger(__name__)
+
+# Type variable for method return type
+T = TypeVar("T")
+
+
+def agent_error_handler(agent_name: str, operation_name: str) -> Callable:
+    """Decorator for consistent agent method error handling.
+    
+    This decorator wraps agent methods (like _generate_plan, _generate_insights)
+    to provide consistent error handling. It catches WorkflowErrors from rate
+    limiters and wraps them with agent-specific messages while preserving context.
+    
+    The decorator handles:
+    - WorkflowErrors from rate limiter (wraps with specific operation message)
+    - Other WorkflowErrors (re-raises as-is)
+    - Generic Exceptions (wraps in WorkflowError with context)
+    
+    Args:
+        agent_name: Name of the agent (e.g., "planner_agent", "insight_agent")
+        operation_name: Name of the operation (e.g., "plan", "insights", "report")
+            Used in error messages like "Failed to generate {operation_name} from LLM"
+    
+    Returns:
+        Decorator function that wraps the agent method
+    
+    Example:
+        ```python
+        @agent_error_handler("planner_agent", "plan")
+        def _generate_plan(self, user_request: str) -> dict[str, Any]:
+            # Method implementation
+            # If rate limiter raises WorkflowError, it will be wrapped with
+            # "Failed to generate plan from LLM"
+            return plan_data
+        ```
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        """Inner decorator that wraps the agent method."""
+        
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            """Wrapper function that handles errors."""
+            try:
+                return func(*args, **kwargs)
+            except WorkflowError as e:
+                # If it's a WorkflowError from rate limiter, wrap with specific context
+                error_msg = str(e).lower()
+                if "llm api" in error_msg or "rate limit" in error_msg:
+                    # Extract context from original error
+                    original_context = getattr(e, "context", {})
+                    
+                    # Preserve original error message in context
+                    operation_context = {
+                        **original_context,
+                        "agent": agent_name,
+                        "operation": operation_name,
+                        "original_error": str(e),
+                    }
+                    
+                    # Wrap with agent-specific message
+                    raise WorkflowError(
+                        f"Failed to generate {operation_name} from LLM",
+                        context=operation_context
+                    ) from e
+                # Re-raise other WorkflowErrors as-is
+                raise
+            except Exception as e:
+                # Wrap unexpected errors in WorkflowError
+                logger.error(
+                    f"Unexpected error in {agent_name}.{func.__name__}: {e}",
+                    exc_info=True
+                )
+                raise WorkflowError(
+                    f"Failed to generate {operation_name} from LLM",
+                    context={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "agent": agent_name,
+                        "operation": func.__name__,
+                    }
+                ) from e
+        
+        return wrapper
+    
+    return decorator
 
 
 class BaseAgent(ABC):
@@ -73,6 +165,62 @@ class BaseAgent(ABC):
         self.llm = llm
         self.config = config
     
+    def invoke_llm(self, messages: list[Any], **kwargs: Any) -> Any:
+        """Invoke LLM with automatic retry logic for rate limits.
+        
+        This method wraps llm.invoke() calls with retry logic using exponential
+        backoff. It handles rate limit errors and transient failures gracefully.
+        
+        All agents should use this method instead of calling self.llm.invoke()
+        directly to ensure consistent retry behavior across all LLM calls.
+        
+        Args:
+            messages: List of messages to send to the LLM
+            **kwargs: Additional keyword arguments to pass to llm.invoke()
+        
+        Returns:
+            Response from LLM
+        
+        Raises:
+            WorkflowError: If all retries are exhausted
+        
+        Example:
+            messages = prompt.format_messages()
+            response = self.invoke_llm(messages)
+            content = response.content
+        """
+        return invoke_llm_with_retry(self.llm, messages, **kwargs)
+    
+    async def invoke_llm_async(self, messages: list[Any], **kwargs: Any) -> Any:
+        """Invoke LLM asynchronously with automatic retry logic for rate limits.
+        
+        This is the async version of invoke_llm(). It uses llm.ainvoke() for
+        non-blocking execution. This allows multiple LLM calls to run concurrently.
+        
+        All agents should use this method when async execution is enabled to ensure
+        consistent retry behavior across all async LLM calls.
+        
+        Args:
+            messages: List of messages to send to the LLM
+            **kwargs: Additional keyword arguments to pass to llm.ainvoke()
+        
+        Returns:
+            Response from LLM
+        
+        Raises:
+            WorkflowError: If all retries are exhausted
+        
+        Example:
+            messages = prompt.format_messages()
+            response = await self.invoke_llm_async(messages)
+            content = response.content
+        
+        Note:
+            This method requires the LLM to support async operations (ainvoke method).
+            If async is not supported, it will fall back to sync execution.
+        """
+        return await invoke_llm_with_retry_async(self.llm, messages, **kwargs)
+    
     @abstractmethod
     def execute(self, state: WorkflowState) -> WorkflowState:
         """Execute agent logic.
@@ -110,6 +258,35 @@ class BaseAgent(ABC):
                 to validation_errors in the state.
         """
         pass
+    
+    async def execute_async(self, state: WorkflowState) -> WorkflowState:
+        """Execute agent logic asynchronously.
+        
+        This is the async version of execute(). By default, it calls the sync
+        execute() method wrapped in an async executor. Subclasses can override
+        this method to provide true async implementations that can run I/O
+        operations concurrently.
+        
+        When async is enabled in config, agents that perform multiple I/O
+        operations (like DataCollectorAgent with multiple web searches) should
+        override this method to use async tools and run operations in parallel.
+        
+        Args:
+            state: Current workflow state (same as execute())
+        
+        Returns:
+            Updated WorkflowState (same as execute())
+        
+        Raises:
+            WorkflowError: If agent execution fails critically
+        
+        Note:
+            Default implementation runs sync execute() in an executor.
+            Override this method in subclasses for true async execution.
+        """
+        # Default: run sync execute in executor
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.execute, state)
     
     @property
     @abstractmethod

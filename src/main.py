@@ -20,15 +20,18 @@ Example:
 
 import argparse
 import logging
+import os
 import sys
 from typing import Any
 
 from langchain_groq import ChatGroq
 
 from src.config import get_config
+from src.exceptions.workflow_error import WorkflowError
 from src.graph.state import WorkflowState, create_initial_state
 from src.graph.workflow import create_workflow
 from src.utils.agent_logger import AgentLogger
+from src.utils.input_validator import sanitize_user_query
 
 # Configure logging
 logging.basicConfig(
@@ -36,6 +39,63 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def initialize_langsmith(config: Any) -> None:
+    """Initialize LangSmith tracing and observability.
+    
+    Configures LangSmith for tracing LLM calls and agent operations.
+    LangSmith integration works automatically with LangChain when environment
+    variables are set or when configured programmatically.
+    
+    Args:
+        config: Config instance from get_config()
+    
+    Raises:
+        ValueError: If langsmith_enabled is True but langsmith_api_key is missing
+    """
+    if not config.langsmith_enabled:
+        logger.debug("LangSmith tracing is disabled")
+        return
+    
+    try:
+        import langsmith
+        
+        # Validate API key is provided
+        if not config.langsmith_api_key:
+            raise ValueError(
+                "langsmith_api_key is required when langsmith_enabled is True. "
+                "Set LANGCHAIN_API_KEY or LANGSMITH_API_KEY environment variable."
+            )
+        
+        # Configure LangSmith programmatically
+        # LangChain automatically uses these environment variables
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_API_KEY"] = config.langsmith_api_key
+        os.environ["LANGCHAIN_PROJECT"] = config.langsmith_project or "multi-agent-system"
+        
+        # Set custom endpoint if provided
+        if config.langsmith_endpoint:
+            os.environ["LANGCHAIN_ENDPOINT"] = config.langsmith_endpoint
+        
+        # Optionally configure via langsmith client
+        langsmith.configure(
+            api_key=config.langsmith_api_key,
+            api_url=config.langsmith_endpoint,
+        )
+        
+        logger.info(
+            f"LangSmith tracing enabled for project: {config.langsmith_project}"
+        )
+        
+    except ImportError:
+        logger.warning(
+            "langsmith package not installed. Install it with: pip install langsmith"
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize LangSmith: {e}")
+        # Don't raise - allow workflow to continue without tracing
+        logger.warning("Continuing without LangSmith tracing")
 
 
 def initialize_llm(config: Any, model_name: str | None = None) -> ChatGroq:
@@ -47,15 +107,6 @@ def initialize_llm(config: Any, model_name: str | None = None) -> ChatGroq:
     
     Returns:
         Initialized ChatGroq LLM instance
-    
-    Example:
-        ```python
-        from src.config import get_config
-        from src.main import initialize_llm
-        
-        config = get_config()
-        llm = initialize_llm(config)
-        ```
     """
     # Priority: model_name > llm_model
     model = model_name or config.llm_model
@@ -83,16 +134,6 @@ def initialize_llms_for_agents(config: Any) -> dict[str, ChatGroq]:
     Returns:
         Dictionary mapping agent names to ChatGroq instances:
         {"planner": llm_instance, "supervisor": llm_instance, ...}
-    
-    Example:
-        ```python
-        from src.config import get_config
-        from src.main import initialize_llms_for_agents
-        
-        config = get_config()
-        agent_llms = initialize_llms_for_agents(config)
-        planner_llm = agent_llms["planner"]
-        ```
     """
     agent_names = ["planner", "supervisor", "insight", "report", "collector", "export"]
     
@@ -151,23 +192,9 @@ def run_analysis(
     
     Raises:
         ValueError: If user_query is empty
+        WorkflowError: If user_query validation fails
         RuntimeError: If workflow execution fails
-    
-    Example:
-        ```python
-        from src.main import run_analysis
-        
-        result = run_analysis("Analyze competitors in the SaaS market")
-        
-        if result.get("report"):
-            print(result["report"])
-        else:
-            print(f"Analysis failed: {result.get('validation_errors', [])}")
-        ```
     """
-    if not user_query or not user_query.strip():
-        raise ValueError("User query cannot be empty")
-    
     # Load configuration if not provided
     if config is None:
         try:
@@ -175,6 +202,25 @@ def run_analysis(
         except Exception as e:
             logger.error(f"Failed to load configuration: {e}")
             raise RuntimeError(f"Configuration loading failed: {e}") from e
+    
+    # Initialize LangSmith tracing if enabled
+    try:
+        initialize_langsmith(config)
+    except Exception as e:
+        # Log warning but don't fail workflow if LangSmith init fails
+        logger.warning(f"LangSmith initialization failed: {e}. Continuing without tracing.")
+    
+    # Validate and sanitize user query
+    try:
+        user_query = sanitize_user_query(user_query, config=config)
+        logger.debug(f"User query validated and sanitized: length={len(user_query)}")
+    except WorkflowError as e:
+        # Convert WorkflowError to ValueError for backward compatibility
+        logger.error(f"User query validation failed: {e}")
+        raise ValueError(str(e)) from e
+    except Exception as e:
+        logger.error(f"User query validation failed: {e}")
+        raise
     
     # Initialize LLMs for agents if not provided
     agent_llms: dict[str, ChatGroq] | None = None
@@ -241,6 +287,17 @@ def run_analysis(
             f"Validation errors: {len(final_state.get('validation_errors', []))}"
         )
     
+    # Export metrics if enabled
+    try:
+        if config.metrics_enabled:
+            from src.utils.metrics import get_metrics_collector
+            collector = get_metrics_collector()
+            metrics_path = collector.export_metrics(config.metrics_export_path)
+            logger.info(f"Metrics exported to {metrics_path}")
+    except Exception as e:
+        # Don't fail workflow if metrics export fails
+        logger.warning(f"Failed to export metrics: {e}")
+    
     return final_state
 
 
@@ -251,11 +308,6 @@ def main() -> int:
     
     Returns:
         Exit code (0 for success, 1 for failure)
-    
-    Example:
-        ```bash
-        python -m src.main "Analyze competitors in the SaaS market"
-        ```
     """
     parser = argparse.ArgumentParser(
         description="Competitor Analysis Multi-Agent System",

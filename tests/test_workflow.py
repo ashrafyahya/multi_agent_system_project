@@ -98,12 +98,110 @@ class TestWorkflowBuilder:
             "trends": ["Digital transformation"],
         }
         decision = _validate_insight_output(state, max_retries=3)
-        assert decision in ["report", "retry", END]
+        assert decision in ["store_warnings", "retry", END]
         
         # Test report validation
-        state["report"] = "## Executive Summary\n\n" + "A" * 500
+        state["report"] = "This is a valid report with sufficient length to pass validation"
         decision = _validate_report_output(state, max_retries=3)
         assert decision in ["export", "retry", END]
+
+
+class TestValidatorImmutability:
+    """Tests to ensure validators don't mutate state."""
+    
+    def test_validate_insight_output_does_not_mutate_state(self) -> None:
+        """Test that _validate_insight_output doesn't mutate input state."""
+        from src.graph.workflow import _validate_insight_output
+        import copy
+        
+        state = create_initial_state("Test")
+        state["insights"] = {
+            "swot": {
+                "strengths": ["Strong brand"],
+                "weaknesses": ["High prices"],
+                "opportunities": ["Emerging markets"],
+                "threats": ["New competitors"],
+            },
+            "positioning": "Premium market leader",
+            "trends": ["Digital transformation"],
+        }
+        state["collected_data"] = {
+            "competitors": [{"name": "Comp1", "source_url": "https://example.com"}]
+        }
+        
+        # Create deep copy to compare
+        original_state = copy.deepcopy(state)
+        
+        # Call validation function
+        _validate_insight_output(state, max_retries=3)
+        
+        # Verify state was not mutated (should be the same object)
+        assert state is original_state or state == original_state
+        # Check that validation_warnings was not added to state
+        assert "validation_warnings" not in state or state.get("validation_warnings") == []
+    
+    def test_validate_collector_output_does_not_mutate_state(self) -> None:
+        """Test that _validate_collector_output doesn't mutate input state."""
+        from src.graph.workflow import _validate_collector_output
+        import copy
+        
+        state = create_initial_state("Test")
+        state["collected_data"] = {
+            "competitors": [
+                {"name": "Comp1", "source_url": "https://example.com"},
+                {"name": "Comp2", "source_url": "https://example2.com"},
+            ]
+        }
+        
+        # Create deep copy to compare
+        original_state = copy.deepcopy(state)
+        
+        # Call validation function
+        _validate_collector_output(state, max_retries=3)
+        
+        # Verify state was not mutated
+        assert state == original_state
+    
+    def test_validate_report_output_does_not_mutate_state(self) -> None:
+        """Test that _validate_report_output doesn't mutate input state."""
+        from src.graph.workflow import _validate_report_output
+        import copy
+        
+        state = create_initial_state("Test")
+        state["report"] = "This is a valid report with sufficient length"
+        
+        # Create deep copy to compare
+        original_state = copy.deepcopy(state)
+        
+        # Call validation function
+        _validate_report_output(state, max_retries=3)
+        
+        # Verify state was not mutated
+        assert state == original_state
+    
+    def test_store_validation_warnings_uses_state_helpers(self) -> None:
+        """Test that _store_validation_warnings uses state helpers immutably."""
+        from src.graph.workflow import _store_validation_warnings
+        import copy
+        
+        state = create_initial_state("Test")
+        state["collected_data"] = {
+            "competitors": [{"name": "Comp1", "source_url": "https://example.com"}]
+        }
+        
+        # Create deep copy to compare
+        original_state = copy.deepcopy(state)
+        
+        # Call function
+        updated_state = _store_validation_warnings(state)
+        
+        # Verify original state was not mutated
+        assert state == original_state
+        # Verify new state is different object
+        assert updated_state is not state
+        # Verify warnings are stored in new state
+        assert "validation_warnings" in updated_state
+        assert isinstance(updated_state["validation_warnings"], list)
     
     def test_workflow_handles_max_retries(self) -> None:
         """Test workflow respects max retries."""

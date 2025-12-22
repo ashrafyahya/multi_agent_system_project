@@ -58,22 +58,21 @@ class TestConfig:
         for var in env_vars_to_check:
             original_values[var] = os.environ.get(var)
         
-        # Explicitly set expected defaults to override .env file values
-        # Pydantic Settings prioritizes environment variables over .env file
-        # Setting LLM_MODEL to the expected default will override .env file
+        # Use _env_file=None to disable .env file loading and test pure defaults
+        # This ensures we test the actual default values, not values from .env file
         env_overrides = {
             "GROQ_API_KEY": "test_key",
-            "LLM_MODEL": "llama-3.1-8b-instant",  # Explicitly set default to override .env
+            "TAVILY_API_KEY": "test_tavily_key",  # Required field
         }
         
-        # Remove other env vars that might be set in .env file
+        # Remove other env vars that might be set
         for var in env_vars_to_check:
-            if var != "LLM_MODEL":
-                os.environ.pop(var, None)
+            os.environ.pop(var, None)
         
-        # Reload config with overridden environment
+        # Reload config with overridden environment, ignoring .env file
         with patch.dict(os.environ, env_overrides, clear=False):
-            config = reload_config()
+            # Use _env_file=None to disable .env file loading
+            config = Config(_env_file=None)
             
             assert config.llm_model == "llama-3.1-8b-instant"  # Default
             assert config.max_retries == 3  # Default
@@ -84,7 +83,7 @@ class TestConfig:
         for var, value in original_values.items():
             if value is not None:
                 os.environ[var] = value
-            elif var in os.environ and var != "LLM_MODEL":
+            elif var in os.environ:
                 os.environ.pop(var, None)
     
     def test_config_validates_groq_api_key_required(self) -> None:
@@ -161,8 +160,8 @@ class TestConfig:
             # Cleanup
             test_dir.rmdir()
     
-    def test_config_handles_optional_tavily_api_key(self) -> None:
-        """Test config handles optional tavily_api_key."""
+    def test_config_requires_tavily_api_key(self) -> None:
+        """Test config requires tavily_api_key."""
         original_tavily = os.environ.pop("TAVILY_API_KEY", None)
         try:
             # Use _env_file=None to disable .env file loading
@@ -173,8 +172,9 @@ class TestConfig:
             ):
                 # Ensure TAVILY_API_KEY is not in environment
                 os.environ.pop("TAVILY_API_KEY", None)
-                config = Config(_env_file=None)
-                assert config.tavily_api_key is None
+                # Should raise ValidationError when tavily_api_key is missing
+                with pytest.raises(ValidationError):
+                    Config(_env_file=None)
             
             with patch.dict(
                 os.environ,
@@ -271,5 +271,145 @@ class TestReloadConfig:
         finally:
             # Restore original config
             src.config._config = original_config
+
+
+class TestValidationThresholds:
+    """Tests for validation threshold configuration fields."""
+    
+    def test_validation_thresholds_use_defaults(self) -> None:
+        """Test validation thresholds use default values when not set."""
+        with patch.dict(os.environ, {"GROQ_API_KEY": "test_key"}, clear=False):
+            config = Config()
+            
+            assert config.min_insights == 8
+            assert config.min_positioning_length == 50
+            assert config.min_report_length == 1200
+            assert config.min_swot_items_per_category == 2
+            assert config.min_trends == 2
+            assert config.min_opportunities == 2
+            assert config.min_collector_sources == 4
+    
+    def test_validation_thresholds_load_from_environment(self) -> None:
+        """Test validation thresholds load from environment variables."""
+        with patch.dict(
+            os.environ,
+            {
+                "GROQ_API_KEY": "test_key",
+                "MIN_INSIGHTS": "10",
+                "MIN_POSITIONING_LENGTH": "100",
+                "MIN_REPORT_LENGTH": "2000",
+                "MIN_SWOT_ITEMS_PER_CATEGORY": "3",
+                "MIN_TRENDS": "5",
+                "MIN_OPPORTUNITIES": "4",
+                "MIN_COLLECTOR_SOURCES": "6",
+            },
+            clear=False,
+        ):
+            config = Config()
+            
+            assert config.min_insights == 10
+            assert config.min_positioning_length == 100
+            assert config.min_report_length == 2000
+            assert config.min_swot_items_per_category == 3
+            assert config.min_trends == 5
+            assert config.min_opportunities == 4
+            assert config.min_collector_sources == 6
+    
+    def test_validation_thresholds_validate_ranges(self) -> None:
+        """Test validation thresholds validate ranges correctly."""
+        # Test min_insights range
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test_key", "MIN_INSIGHTS": "0"},
+            clear=False,
+        ):
+            with pytest.raises(ValidationError):
+                Config()
+        
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test_key", "MIN_INSIGHTS": "101"},
+            clear=False,
+        ):
+            with pytest.raises(ValidationError):
+                Config()
+        
+        # Test min_positioning_length range
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test_key", "MIN_POSITIONING_LENGTH": "5"},
+            clear=False,
+        ):
+            with pytest.raises(ValidationError):
+                Config()
+        
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test_key", "MIN_POSITIONING_LENGTH": "1001"},
+            clear=False,
+        ):
+            with pytest.raises(ValidationError):
+                Config()
+        
+        # Test min_report_length range
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test_key", "MIN_REPORT_LENGTH": "50"},
+            clear=False,
+        ):
+            with pytest.raises(ValidationError):
+                Config()
+        
+        # Test min_swot_items_per_category range
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test_key", "MIN_SWOT_ITEMS_PER_CATEGORY": "0"},
+            clear=False,
+        ):
+            with pytest.raises(ValidationError):
+                Config()
+        
+        # Test min_trends range
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test_key", "MIN_TRENDS": "0"},
+            clear=False,
+        ):
+            with pytest.raises(ValidationError):
+                Config()
+        
+        # Test min_opportunities range
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test_key", "MIN_OPPORTUNITIES": "0"},
+            clear=False,
+        ):
+            with pytest.raises(ValidationError):
+                Config()
+        
+        # Test min_collector_sources range
+        with patch.dict(
+            os.environ,
+            {"GROQ_API_KEY": "test_key", "MIN_COLLECTOR_SOURCES": "0"},
+            clear=False,
+        ):
+            with pytest.raises(ValidationError):
+                Config()
+    
+    def test_validation_thresholds_backward_compatibility(self) -> None:
+        """Test that validation thresholds maintain backward compatibility with defaults."""
+        # Test that defaults match original hardcoded values
+        with patch.dict(os.environ, {"GROQ_API_KEY": "test_key"}, clear=False):
+            config = Config()
+            
+            # These defaults should match the original hardcoded values
+            # from validators before this change
+            assert config.min_insights == 8  # Original: MIN_INSIGHTS = 8
+            assert config.min_positioning_length == 50  # Original: MIN_POSITIONING_LENGTH = 50
+            assert config.min_report_length == 1200  # Original: min_length = 1200 in workflow.py
+            assert config.min_swot_items_per_category == 2  # Original: MIN_SWOT_ITEMS_PER_CATEGORY = 2
+            assert config.min_trends == 2  # Original: MIN_TRENDS = 2
+            assert config.min_opportunities == 2  # Original: MIN_OPPORTUNITIES = 2
+            assert config.min_collector_sources == 4  # Original: MIN_SOURCES = 4
 
 

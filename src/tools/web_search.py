@@ -19,20 +19,29 @@ Example:
     ```
 """
 
+import asyncio
 import logging
+import re
 from typing import Any
 
 try:
-    # Use TavilySearchResults (works reliably)
-    # Note: TavilySearch has different return format, so we stick with TavilySearchResults
-    from langchain_tavily import TavilySearchResults
-    TAVILY_SEARCH_CLASS = TavilySearchResults
+    # Try to use the new TavilySearch from langchain_tavily (recommended)
+    # This eliminates the deprecation warning
+    from langchain_tavily import TavilySearch
+    TAVILY_SEARCH_CLASS = TavilySearch
 except ImportError:
-    # Fallback to langchain_community if langchain_tavily is not available
-    from langchain_community.tools.tavily_search import TavilySearchResults
-    TAVILY_SEARCH_CLASS = TavilySearchResults
+    try:
+        # Fallback to TavilySearchResults from langchain_tavily
+        from langchain_tavily import TavilySearchResults
+        TAVILY_SEARCH_CLASS = TavilySearchResults
+    except ImportError:
+        # Final fallback to langchain_community (deprecated)
+        from langchain_community.tools.tavily_search import TavilySearchResults
+        TAVILY_SEARCH_CLASS = TavilySearchResults
 from langchain_core.tools import tool
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
+                      wait_exponential)
+from tenacity.asyncio import AsyncRetrying
 
 from src.config import get_config
 from src.exceptions.collector_error import CollectorError
@@ -75,41 +84,55 @@ def _perform_tavily_search(query: str, max_results: int, api_key: str | None) ->
             )
         
         # Create Tavily search tool
-        # Use the appropriate class (TavilySearch or TavilySearchResults)
-        # Both expect 'tavily_api_key' parameter
+        # Both TavilySearch and TavilySearchResults use 'tavily_api_key'
         search_tool = TAVILY_SEARCH_CLASS(
             max_results=max_results,
             tavily_api_key=api_key,
         )
         
         # Perform search
-        results = search_tool.invoke(query)
+        raw_response = search_tool.invoke(query)
         
-        # Handle different return formats from TavilySearch vs TavilySearchResults
-        # TavilySearch may return a single string or list of strings
-        # TavilySearchResults returns a list of dicts
-        if not isinstance(results, list):
-            # If results is not a list, convert it to a list
-            results = [results] if results else []
+        # Normalize response format: Tavily API evolution introduced breaking changes
+        # Modern API (langchain_tavily >= 0.1.0): Returns dict with 'results' key containing array of result objects
+        # Legacy API (langchain_community): Returns list of result objects directly
+        # This abstraction ensures compatibility across API versions
+        if isinstance(raw_response, dict) and "results" in raw_response:
+            # Extract results array from modern API response wrapper
+            results = raw_response.get("results", [])
+        elif isinstance(raw_response, list):
+            # Legacy format: response is already the results array
+            results = raw_response
+        else:
+            # Edge case: handle unexpected response types by wrapping in list
+            results = [raw_response] if raw_response else []
         
         # Handle different return formats
         formatted_results = []
         for result in results:
             if isinstance(result, str):
-                # If result is a string, try to parse it or create a basic entry
-                # This handles the case where TavilySearch returns strings
+                # If result is a string, try to extract URL and content
+                # Look for URLs in the string
+                url_match = re.search(r'https?://[^\s]+', result)
+                url = url_match.group(0) if url_match else ""
+                # Use the string as snippet, extract title from first line
+                lines = result.split('\n')
+                title = lines[0][:100] if lines else result[:100]
+                snippet = result
+                
                 formatted_results.append({
-                    "url": "",
-                    "title": result[:100] if len(result) > 100 else result,
-                    "snippet": result,
+                    "url": url,
+                    "title": title,
+                    "snippet": snippet,
                     "source": "tavily",
                 })
             elif isinstance(result, dict):
-                # Standard dictionary format from TavilySearchResults
+                # Standard dictionary format from TavilySearchResults or TavilySearch
+                # TavilySearch uses 'content', TavilySearchResults may use 'snippet'
                 formatted_results.append({
                     "url": result.get("url", ""),
                     "title": result.get("title", ""),
-                    "snippet": result.get("content", result.get("snippet", "")),
+                    "snippet": result.get("content", result.get("snippet", result.get("raw_content", ""))),
                     "source": "tavily",
                 })
             else:
@@ -264,6 +287,220 @@ def web_search(query: str, max_results: int = 10) -> dict[str, Any]:
         raise
     except Exception as e:
         error_msg = f"Unexpected error during web search: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        return {
+            "success": False,
+            "error": error_msg,
+            "results": [],
+            "query": query,
+            "count": 0,
+        }
+
+
+async def _perform_tavily_search_async(query: str, max_results: int, api_key: str | None) -> list[dict[str, Any]]:
+    """Perform Tavily search asynchronously with retry logic.
+    
+    This is the async version of _perform_tavily_search. It uses async/await
+    for non-blocking execution, allowing multiple searches to run concurrently.
+    
+    Args:
+        query: Search query string
+        max_results: Maximum number of results to return
+        api_key: Tavily API key (optional, can use default)
+        
+    Returns:
+        List of search result dictionaries
+        
+    Raises:
+        CollectorError: If search fails after all retries
+        Exception: Other exceptions from Tavily API
+    """
+    try:
+        # Validate API key before attempting search
+        if not api_key:
+            raise CollectorError(
+                "Tavily API key is required but not provided. "
+                "Please set TAVILY_API_KEY in your .env file or environment variables.",
+                context={"query": query, "max_results": max_results}
+            )
+        
+        # Create Tavily search tool
+        # Both TavilySearch and TavilySearchResults use 'tavily_api_key'
+        search_tool = TAVILY_SEARCH_CLASS(
+            max_results=max_results,
+            tavily_api_key=api_key,
+        )
+        
+        # Check if tool supports async
+        if hasattr(search_tool, "ainvoke"):
+            # Use async invoke if available
+            raw_response = await search_tool.ainvoke(query)
+        else:
+            # Fall back to sync invoke in executor
+            loop = asyncio.get_event_loop()
+            raw_response = await loop.run_in_executor(None, search_tool.invoke, query)
+        
+        # Normalize response format: Tavily API evolution introduced breaking changes
+        # Modern API (langchain_tavily >= 0.1.0): Returns dict with 'results' key containing array of result objects
+        # Legacy API (langchain_community): Returns list of result objects directly
+        # This abstraction ensures compatibility across API versions
+        if isinstance(raw_response, dict) and "results" in raw_response:
+            # Extract results array from modern API response wrapper
+            results = raw_response.get("results", [])
+        elif isinstance(raw_response, list):
+            # Legacy format: response is already the results array
+            results = raw_response
+        else:
+            # Edge case: handle unexpected response types by wrapping in list
+            results = [raw_response] if raw_response else []
+        
+        formatted_results = []
+        for result in results:
+            if isinstance(result, str):
+                # If result is a string, try to extract URL and content
+                url_match = re.search(r'https?://[^\s]+', result)
+                url = url_match.group(0) if url_match else ""
+                lines = result.split('\n')
+                title = lines[0][:100] if lines else result[:100]
+                snippet = result
+                
+                formatted_results.append({
+                    "url": url,
+                    "title": title,
+                    "snippet": snippet,
+                    "source": "tavily",
+                })
+            elif isinstance(result, dict):
+                # Standard dictionary format from TavilySearchResults or TavilySearch
+                formatted_results.append({
+                    "url": result.get("url", ""),
+                    "title": result.get("title", ""),
+                    "snippet": result.get("content", result.get("snippet", result.get("raw_content", ""))),
+                    "source": "tavily",
+                })
+            else:
+                logger.warning(f"Unexpected result format: {type(result)}, value: {result}")
+                formatted_results.append({
+                    "url": "",
+                    "title": str(result)[:100],
+                    "snippet": str(result),
+                    "source": "tavily",
+                })
+        
+        return formatted_results
+        
+    except Exception as e:
+        logger.error(f"Tavily search failed: {e}", exc_info=True)
+        raise CollectorError(
+            f"Web search failed for query: {query}",
+            context={"query": query, "max_results": max_results, "error": str(e)}
+        ) from e
+
+
+async def web_search_async(query: str, max_results: int = 10) -> dict[str, Any]:
+    """Search the web asynchronously for information about competitors.
+    
+    This is the async version of web_search. It performs a web search using
+    Tavily search API and returns structured results. Multiple searches can
+    be run concurrently using asyncio.gather().
+    
+    Args:
+        query: Search query string describing what to search for
+        max_results: Maximum number of search results to return (default: 10)
+    
+    Returns:
+        Dictionary with the same structure as web_search():
+        {
+            "success": bool,
+            "results": list[dict],
+            "error": str,
+            "query": str,
+            "count": int
+        }
+    
+    Example:
+        ```python
+        # Run multiple searches concurrently
+        queries = ["query1", "query2", "query3"]
+        results = await asyncio.gather(*[
+            web_search_async(q, max_results=10)
+            for q in queries
+        ])
+        ```
+    """
+    # Validate inputs (same as sync version)
+    if not query or not query.strip():
+        return {
+            "success": False,
+            "error": "Query cannot be empty",
+            "results": [],
+            "query": query,
+            "count": 0,
+        }
+    
+    if max_results < 1 or max_results > 20:
+        return {
+            "success": False,
+            "error": f"max_results must be between 1 and 20, got {max_results}",
+            "results": [],
+            "query": query,
+            "count": 0,
+        }
+    
+    query = query.strip()
+    
+    try:
+        # Get configuration
+        config = get_config()
+        api_key = config.tavily_api_key
+        
+        # Clean and validate API key
+        if api_key:
+            api_key = api_key.strip()
+            if not api_key:
+                api_key = None
+        
+        if not api_key:
+            error_msg = (
+                "TAVILY_API_KEY not configured. "
+                "Please set TAVILY_API_KEY in your .env file or environment variables."
+            )
+            logger.error(error_msg)
+            return {
+                "success": False,
+                "error": error_msg,
+                "results": [],
+                "query": query,
+                "count": 0,
+            }
+        
+        logger.info(f"Performing async web search: query='{query}', max_results={max_results}")
+        
+        # Use async retry logic
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type((CollectorError,)),
+            reraise=True,
+        ):
+            with attempt:
+                results = await _perform_tavily_search_async(query, max_results, api_key)
+        
+        results = results[:max_results]
+        logger.info(f"Async web search successful: found {len(results)} results")
+        
+        return {
+            "success": True,
+            "results": results,
+            "query": query,
+            "count": len(results),
+        }
+        
+    except CollectorError:
+        raise
+    except Exception as e:
+        error_msg = f"Unexpected error during async web search: {str(e)}"
         logger.error(error_msg, exc_info=True)
         
         return {
