@@ -53,6 +53,17 @@ class Config(BaseSettings):
         metrics_enabled: Enable/disable metrics tracking (default: True)
         metrics_export_path: Directory path for exporting metrics data (default: ./data/metrics)
         use_async: Enable/disable async execution for I/O operations (default: False)
+        min_primary_sources: Minimum number of primary sources required (default: 2)
+        max_low_quality_sources_ratio: Maximum ratio of low-quality sources (default: 0.5)
+        enable_data_verification: Enable/disable data verification (default: True)
+        source_quality_cache_size: Cache size for URL classifications (default: 1000)
+        data_verification_timeout: Timeout for LLM calls in data verification (default: 10.0)
+        primary_source_search_enabled: Enable/disable primary source search (default: True)
+        primary_source_search_ratio: Ratio of queries for primary sources (default: 0.3)
+        scrape_for_verification: Enable/disable scraping for verification (default: True)
+        scrape_quality_threshold: Quality threshold for scraping (default: secondary_high)
+        max_low_quality_before_skip: Skip low-quality if enough high-quality found (default: 2)
+        auto_expand_primary_sources: Auto-expand search for primary sources (default: True)
     """
     
     model_config = SettingsConfigDict(
@@ -296,6 +307,100 @@ class Config(BaseSettings):
     langsmith_endpoint: Optional[str] = Field(
         default=None,
         description="Custom LangSmith endpoint URL. If not provided, uses default LangSmith cloud endpoint.",
+    )
+    
+    # Source quality and data verification configuration
+    min_primary_sources: int = Field(
+        default=2,
+        description="Minimum number of primary sources required for high-quality analysis",
+        ge=0,
+        le=50,
+    )
+    
+    max_low_quality_sources_ratio: float = Field(
+        default=0.5,
+        description="Maximum ratio of low-quality sources (secondary_low + community) to total sources",
+        ge=0.0,
+        le=1.0,
+    )
+    
+    enable_data_verification: bool = Field(
+        default=True,
+        description="Enable/disable data verification for quantitative metrics",
+    )
+    
+    source_quality_cache_size: int = Field(
+        default=1000,
+        description="Cache size for URL quality classifications (LRU cache)",
+        ge=1,
+        le=100000,
+    )
+    
+    data_verification_timeout: float = Field(
+        default=10.0,
+        description="Timeout in seconds for LLM calls in data verification",
+        ge=1.0,
+        le=300.0,
+    )
+    
+    # Enhanced data quality configuration
+    primary_source_search_enabled: bool = Field(
+        default=True,
+        description="Enable/disable generation of primary source-specific search queries",
+    )
+    
+    primary_source_search_ratio: float = Field(
+        default=0.5,
+        description="Ratio of search queries dedicated to primary sources (0.0-1.0)",
+        ge=0.0,
+        le=1.0,
+    )
+    
+    scrape_for_verification: bool = Field(
+        default=True,
+        description="Enable/disable scraping full pages for data verification when quantitative data exists",
+    )
+    
+    scrape_quality_threshold: str = Field(
+        default="secondary_high",
+        description="Minimum source quality level for scraping (primary, secondary_high, secondary_medium, secondary_low, community)",
+    )
+    
+    max_low_quality_before_skip: int = Field(
+        default=2,
+        description="Skip low-quality sources if this many higher-quality sources are already found",
+        ge=0,
+        le=50,
+    )
+    
+    auto_expand_primary_sources: bool = Field(
+        default=True,
+        description="Automatically expand search to find more primary sources if minimum not met",
+    )
+    
+    # Enhanced verification and bias reduction options
+    verification_confidence_threshold: float = Field(
+        default=0.7,
+        description="Minimum confidence threshold for data verification (0.0-1.0)",
+        ge=0.0,
+        le=1.0,
+    )
+    
+    bias_detection_enabled: bool = Field(
+        default=True,
+        description="Enable automatic bias detection in sources and data",
+    )
+    
+    max_similar_sources: int = Field(
+        default=3,
+        description="Maximum number of sources from the same domain to prevent bias",
+        ge=1,
+        le=10,
+    )
+    
+    source_diversity_required: bool = Field(
+        default=True,
+        description="Require diverse source types for comprehensive analysis",
     )
     
     @field_validator("state_storage_dir", mode="after")

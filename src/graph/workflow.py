@@ -25,6 +25,7 @@ from src.graph.validators.data_consistency_validator import \
     DataConsistencyValidator
 from src.graph.validators.insight_validator import InsightValidator
 from src.graph.validators.report_validator import ReportValidator
+from src.graph.validators.source_quality_validator import SourceQualityValidator
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,7 @@ def create_workflow(
     graph.add_node("planner", planner_node_func)
     graph.add_node("supervisor", supervisor_node_func)
     graph.add_node("collector", collector_node_func)
+    graph.add_node("validate_source_quality", lambda state: _validate_source_quality(state))
     graph.add_node("insight", insight_node_func)
     graph.add_node("store_warnings", lambda state: _store_validation_warnings(state))
     graph.add_node("report", report_node_func)
@@ -142,16 +144,19 @@ def create_workflow(
         }
     )
     
-    # collector -> validate -> insight or retry or END
+    # collector -> validate -> validate_source_quality or retry or END
     graph.add_conditional_edges(
         "collector",
         lambda state: _validate_collector_output(state, max_retries),
         {
-            "insight": "insight",
+            "validate_source_quality": "validate_source_quality",
             "retry": "retry",
             END: END,
         }
     )
+    
+    # validate_source_quality -> insight (non-blocking, stores warnings)
+    graph.add_edge("validate_source_quality", "insight")
     
     # insight -> validate -> store_warnings or retry or END
     graph.add_conditional_edges(
@@ -257,10 +262,49 @@ def _supervisor_decision(
     return END
 
 
+def _validate_source_quality(state: WorkflowState) -> WorkflowState:
+    """Validate source quality and store warnings.
+    
+    Non-blocking validator: Always continues to insight,
+    warnings are stored in state for report generation.
+    
+    Args:
+        state: Current workflow state
+        
+    Returns:
+        Updated state with source quality warnings (if any)
+    """
+    try:
+        validator = SourceQualityValidator()
+        collected_data = state.get("collected_data", {})
+        result = validator.validate(collected_data)
+        
+        # Store warnings in state (non-blocking)
+        if result.warnings:
+            state = update_state(
+                state,
+                source_quality_warnings=result.warnings
+            )
+            logger.info(
+                f"Source quality validation: {len(result.warnings)} warnings stored, "
+                "proceeding to insight"
+            )
+        else:
+            logger.debug("Source quality validation: No warnings, proceeding to insight")
+    except Exception as e:
+        logger.error(
+            f"Error during source quality validation: {e}. "
+            "Continuing without warnings."
+        )
+        # Return state unchanged (non-blocking)
+    
+    return state
+
+
 def _validate_collector_output(
     state: WorkflowState,
     max_retries: int
-) -> Literal["insight", "retry", END]:
+) -> Literal["validate_source_quality", "retry", END]:
     """Validate collector output and decide next step.
     
     Args:
@@ -277,8 +321,8 @@ def _validate_collector_output(
     retry_count = state.get("retry_count", 0)
     
     if result.is_valid:
-        logger.info("Collector validation passed, proceeding to insight")
-        return "insight"
+        logger.info("Collector validation passed, proceeding to source quality validation")
+        return "validate_source_quality"
     elif retry_count < max_retries and state.get("plan"):
         logger.warning(
             f"Collector validation failed ({len(result.errors)} errors), "

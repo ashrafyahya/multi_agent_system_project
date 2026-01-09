@@ -79,10 +79,16 @@ Return your analysis as a valid JSON object with this exact structure:
 - All insights must be specific, actionable, and data-driven
 - Avoid generic statements; use concrete examples and numbers
 - Prioritize insights by strategic importance and data quality
+- When source quality is low (marketing blogs, community), be more cautious with quantitative claims
+- Mark insights as 'estimated' if based on low-quality sources or extrapolation
 
 **Best Practices:**
 - Cross-reference multiple data points to validate insights
 - Distinguish between facts (from data) and inferences (your analysis)
 - Focus on insights that inform strategic decisions
-- Consider both short-term tactical and long-term strategic implications"""
+- Consider both short-term tactical and long-term strategic implications
+- Consider source quality when evaluating data reliability
+- Prioritize insights based on verified data over estimated data
+- If source quality information is provided, give higher weight to insights from primary sources
+- Clearly distinguish between verified quantitative data and estimated/extrapolated data"""
 

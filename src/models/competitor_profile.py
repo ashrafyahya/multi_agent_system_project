@@ -20,6 +20,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
+from src.models.source_quality import SourceQuality
+
 
 class CompetitorProfile(BaseModel):
     """Structured competitor data.
@@ -41,6 +43,8 @@ class CompetitorProfile(BaseModel):
         founded_year: Optional year the company was founded
         headquarters: Optional headquarters location
         key_features: Optional list of key product features
+        source_quality: Optional source quality classification
+        data_verification_status: Optional dictionary mapping metric names to verification status
     """
     
     model_config = {"extra": "forbid"}
@@ -108,6 +112,16 @@ class CompetitorProfile(BaseModel):
     key_features: list[str] = Field(
         default_factory=list,
         description="List of key product features",
+    )
+    
+    source_quality: SourceQuality | None = Field(
+        default=None,
+        description="Source quality classification (primary, secondary_high, secondary_medium, secondary_low, community)",
+    )
+    
+    data_verification_status: dict[str, str] | None = Field(
+        default=None,
+        description="Data verification status for quantitative metrics. Keys are metric names (e.g., 'market_share', 'revenue'), values are 'verified', 'estimated', or 'not_found'",
     )
     
     @field_validator("name")

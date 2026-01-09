@@ -4,17 +4,50 @@ This module contains unit tests for all Pydantic models to verify
 validation, serialization, and field constraints.
 """
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from pathlib import Path
-
 from src.models.competitor_profile import CompetitorProfile
-from src.models.insight_model import Insight, SWOT
+from src.models.insight_model import SWOT, Insight
 from src.models.pdf_branding_config import PDFBrandingConfig
 from src.models.pdf_layout_config import PDFLayoutConfig
 from src.models.plan_model import Plan
 from src.models.report_model import Report
+from src.models.source_quality import SourceQuality
+
+
+class TestSourceQualityEnum:
+    """Tests for SourceQuality enum."""
+    
+    def test_enum_values(self) -> None:
+        """Test that all enum values are correct."""
+        assert SourceQuality.PRIMARY == "primary"
+        assert SourceQuality.SECONDARY_HIGH == "secondary_high"
+        assert SourceQuality.SECONDARY_MEDIUM == "secondary_medium"
+        assert SourceQuality.SECONDARY_LOW == "secondary_low"
+        assert SourceQuality.COMMUNITY == "community"
+    
+    def test_enum_string_conversion(self) -> None:
+        """Test that enum can be converted to string."""
+        assert SourceQuality.PRIMARY == "primary"
+        assert SourceQuality.SECONDARY_HIGH == "secondary_high"
+        assert SourceQuality.SECONDARY_MEDIUM == "secondary_medium"
+        assert SourceQuality.SECONDARY_LOW == "secondary_low"
+        assert SourceQuality.COMMUNITY == "community"
+    
+    def test_enum_comparison(self) -> None:
+        """Test that enum values can be compared."""
+        assert SourceQuality.PRIMARY == "primary"
+        assert SourceQuality.SECONDARY_HIGH != SourceQuality.PRIMARY
+        assert SourceQuality.PRIMARY != "invalid"
+    
+    def test_enum_serialization(self) -> None:
+        """Test that enum can be serialized."""
+        # Enum should serialize to its value
+        assert SourceQuality.PRIMARY.value == "primary"
+        assert SourceQuality.SECONDARY_HIGH.value == "secondary_high"
 
 
 class TestPlanModel:
@@ -159,6 +192,75 @@ class TestCompetitorProfileModel:
         )
         
         assert profile.products == ["Product A", "Product B"]
+    
+    def test_competitor_profile_source_quality(self) -> None:
+        """Test that source_quality field works correctly."""
+        profile = CompetitorProfile(
+            name="Competitor Inc",
+            source_url="https://source.com/article",
+            source_quality=SourceQuality.PRIMARY,
+        )
+        
+        assert profile.source_quality == SourceQuality.PRIMARY
+        
+        # Test with None (backward compatibility)
+        profile2 = CompetitorProfile(
+            name="Competitor Inc",
+            source_url="https://source.com/article",
+        )
+        assert profile2.source_quality is None
+    
+    def test_competitor_profile_data_verification_status(self) -> None:
+        """Test that data_verification_status field works correctly."""
+        profile = CompetitorProfile(
+            name="Competitor Inc",
+            source_url="https://source.com/article",
+            data_verification_status={
+                "market_share": "verified",
+                "revenue": "estimated",
+                "user_count": "not_found",
+            },
+        )
+        
+        assert profile.data_verification_status is not None
+        assert profile.data_verification_status["market_share"] == "verified"
+        assert profile.data_verification_status["revenue"] == "estimated"
+        assert profile.data_verification_status["user_count"] == "not_found"
+        
+        # Test with None (backward compatibility)
+        profile2 = CompetitorProfile(
+            name="Competitor Inc",
+            source_url="https://source.com/article",
+        )
+        assert profile2.data_verification_status is None
+    
+    def test_competitor_profile_backward_compatibility(self) -> None:
+        """Test that existing profiles without new fields still work."""
+        # Old profile structure (without new fields)
+        profile_data = {
+            "name": "Competitor Inc",
+            "source_url": "https://source.com/article",
+        }
+        profile = CompetitorProfile.model_validate(profile_data)
+        
+        assert profile.name == "Competitor Inc"
+        assert profile.source_quality is None
+        assert profile.data_verification_status is None
+    
+    def test_competitor_profile_enum_serialization(self) -> None:
+        """Test that SourceQuality enum serializes correctly."""
+        profile = CompetitorProfile(
+            name="Competitor Inc",
+            source_url="https://source.com/article",
+            source_quality=SourceQuality.SECONDARY_HIGH,
+        )
+        
+        profile_dict = profile.model_dump()
+        assert profile_dict["source_quality"] == "secondary_high"
+        
+        # Deserialize back
+        profile2 = CompetitorProfile.model_validate(profile_dict)
+        assert profile2.source_quality == SourceQuality.SECONDARY_HIGH
 
 
 class TestSWOTModel:

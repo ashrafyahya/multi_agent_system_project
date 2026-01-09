@@ -7,6 +7,7 @@ This package contains Pydantic models for:
 - Report: Final competitor analysis report
 - PDFBrandingConfig: PDF branding configuration
 - PDFLayoutConfig: PDF layout configuration
+- SourceQuality: Source quality classification enum
 """
 
 from src.models.competitor_profile import CompetitorProfile
@@ -15,6 +16,7 @@ from src.models.pdf_branding_config import PDFBrandingConfig
 from src.models.pdf_layout_config import PDFLayoutConfig
 from src.models.plan_model import Plan
 from src.models.report_model import Report
+from src.models.source_quality import SourceQuality
 
 __all__ = [
     "Plan",
@@ -24,4 +26,5 @@ __all__ = [
     "Report",
     "PDFBrandingConfig",
     "PDFLayoutConfig",
+    "SourceQuality",
 ]

@@ -20,9 +20,12 @@ from src.graph.state import WorkflowState
 from src.graph.state_utils import update_state
 from src.models.competitor_profile import CompetitorProfile
 from src.models.plan_model import Plan
+from src.models.source_quality import SourceQuality
 from src.tools.scraper import scrape_url, scrape_url_async
 from src.tools.web_search import web_search, web_search_async
+from src.utils.data_verification_service import DataVerificationService
 from src.utils.input_validator import validate_and_sanitize_url, validate_url
+from src.utils.source_quality_analyzer import SourceQualityAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,11 @@ class DataCollectorAgent(BaseAgent):
         llm: Language model instance (injected, may be used for data extraction)
         config: Configuration dictionary (injected)
     """
+    
+    def _get_global_config(self):
+        """Get the global configuration object."""
+        from src.config import get_config
+        return get_config()
     
     def execute(self, state: WorkflowState) -> WorkflowState:
         """Execute data collection based on plan.
@@ -88,11 +96,20 @@ class DataCollectorAgent(BaseAgent):
             
             competitors = self._collect_competitor_data(plan)
             
+            # Add timestamp and source statistics
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            
+            # Calculate source statistics
+            source_stats = self._calculate_source_statistics(competitors)
+            
             new_state = update_state(
                 state,
                 collected_data={
                     "competitors": [comp.model_dump() for comp in competitors]
                 },
+                data_collection_timestamp=timestamp,
+                source_statistics=source_stats,
                 current_task=f"Collected data for {len(competitors)} competitors"
             )
             
@@ -232,7 +249,8 @@ class DataCollectorAgent(BaseAgent):
                             result["url"] = ""  # Clear invalid URL but continue processing
                             url = ""
                     
-                    competitor = self._extract_competitor_info(result, seen_names)
+                    skip_low_quality = self._should_skip_low_quality(competitors)
+                    competitor = self._extract_competitor_info(result, seen_names, skip_low_quality)
                     if competitor:
                         competitors.append(competitor)
                         if url:
@@ -256,6 +274,13 @@ class DataCollectorAgent(BaseAgent):
                     "success": False
                 })
                 continue
+        
+        # Ensure we have minimum primary sources
+        additional_competitors = self._ensure_primary_sources(plan, competitors)
+        competitors.extend(additional_competitors)
+        
+        # Find primary sources for each competitor
+        competitors = self._find_primary_sources_for_competitors(competitors)
         
         # Validate that we collected at least some competitors
         self._validate_collection_results(competitors, search_queries, failed_searches)
@@ -333,7 +358,7 @@ class DataCollectorAgent(BaseAgent):
                     logger.debug(f"Invalid URL skipped: {url}, error: {e}")
                     continue
                 
-                competitor = self._extract_competitor_info(result, seen_names)
+                competitor = self._extract_competitor_info(result, seen_names, skip_low_quality=False)
                 if competitor:
                     competitors.append(competitor)
                     seen_urls.add(url)
@@ -368,6 +393,9 @@ class DataCollectorAgent(BaseAgent):
             except Exception as e:
                 logger.warning(f"Error during parallel scraping: {e}")
         
+        # Find primary sources for competitors
+        competitors = self._find_primary_sources_for_competitors(competitors)
+        
         # Validate that we collected at least some competitors
         self._validate_collection_results(competitors, search_queries, failed_searches)
         
@@ -397,6 +425,13 @@ class DataCollectorAgent(BaseAgent):
             elif "product" in task.lower():
                 queries.append(f"{task} features")
         
+        # Add primary source queries if enabled
+        from src.config import get_config
+        global_config = get_config()
+        if global_config.primary_source_search_enabled:
+            primary_queries = self._generate_primary_source_queries(tasks)
+            queries.extend(primary_queries)
+        
         # Deduplicate while preserving order
         seen = set()
         unique_queries = []
@@ -408,16 +443,333 @@ class DataCollectorAgent(BaseAgent):
         
         return unique_queries[:5]  # Limit to 5 queries
     
+    def _generate_primary_source_queries(self, tasks: list[str]) -> list[str]:
+        """Generate primary source-specific search queries.
+        
+        Args:
+            tasks: List of tasks from plan
+        
+        Returns:
+            List of primary source search queries
+        """
+        primary_queries: list[str] = []
+        
+        for task in tasks:
+            # Extract potential company/product names from task
+            # Simple heuristic: look for capitalized words or known patterns
+            words = task.split()
+            potential_names = []
+            
+            for word in words:
+                # Skip common words
+                if word.lower() in ['find', 'analyze', 'research', 'identify', 'competitors', 'competition', 'market', 'pricing', 'products', 'features']:
+                    continue
+                # Keep capitalized words or words that look like product names
+                if word[0].isupper() or len(word) > 3:
+                    potential_names.append(word)
+            
+            # If we found potential names, create primary source queries
+            if potential_names:
+                base_name = " ".join(potential_names[:2])  # Use first 1-2 names
+                
+                # SEC filings
+                primary_queries.append(f'site:sec.gov {base_name} financial report')
+                primary_queries.append(f'site:sec.gov {base_name} 10-K')
+                primary_queries.append(f'site:sec.gov {base_name} annual report')
+                
+                # Company investor relations
+                primary_queries.append(f'{base_name} site:investor.company.com')
+                primary_queries.append(f'{base_name} investor relations')
+                primary_queries.append(f'{base_name} official pricing page')
+                primary_queries.append(f'{base_name} press release revenue')
+                
+                # Government/business registries
+                primary_queries.append(f'{base_name} site:bbb.org')
+                primary_queries.append(f'{base_name} site:crunchbase.com')
+        
+        return primary_queries
+    
+    def _prioritize_results_by_quality(self, search_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Prioritize search results by source quality.
+        
+        Args:
+            search_results: List of search result dictionaries
+        
+        Returns:
+            Sorted list with higher quality sources first
+        """
+        if not search_results:
+            return search_results
+        
+        # Analyze quality for each result
+        results_with_quality = []
+        analyzer = SourceQualityAnalyzer()
+        
+        for result in search_results:
+            url = result.get("url", "")
+            quality = None
+            if url:
+                try:
+                    quality = analyzer.analyze(url)
+                except Exception as e:
+                    logger.debug(f"Failed to analyze quality for {url}: {e}")
+            
+            results_with_quality.append({
+                "result": result,
+                "quality": quality,
+                "quality_value": quality.value if quality else "unknown"
+            })
+        
+        # Sort by quality priority (PRIMARY first, then SECONDARY_HIGH, etc.)
+        quality_order = {
+            "primary": 0,
+            "secondary_high": 1,
+            "secondary_medium": 2,
+            "secondary_low": 3,
+            "community": 4,
+            "unknown": 5
+        }
+        
+        results_with_quality.sort(key=lambda x: quality_order.get(x["quality_value"], 5))
+        
+        # Return just the results
+        return [item["result"] for item in results_with_quality]
+    
+    def _ensure_primary_sources(self, plan: Plan, existing_competitors: list[CompetitorProfile]) -> list[CompetitorProfile]:
+        """Ensure minimum primary sources are found by expanding search if needed.
+        
+        Args:
+            plan: Execution plan with tasks
+            existing_competitors: Already collected competitors
+        
+        Returns:
+            Additional competitors from expanded search
+        """
+        global_config = self._get_global_config()
+        if not global_config.auto_expand_primary_sources:
+            return []
+        
+        # Count current primary sources
+        primary_count = sum(
+            1 for comp in existing_competitors
+            if comp.source_quality and comp.source_quality.value == "primary"
+        )
+        
+        if primary_count >= global_config.min_primary_sources:
+            logger.debug(f"Sufficient primary sources found ({primary_count})")
+            return []
+        
+        logger.info(f"Only {primary_count} primary sources found, expanding search...")
+        
+        additional_competitors = []
+        max_attempts = 3
+        
+        for attempt in range(max_attempts):
+            if primary_count >= global_config.min_primary_sources:
+                break
+                
+            # Generate additional primary-focused queries
+            primary_queries = []
+            for task in plan.tasks:
+                primary_queries.extend(self._generate_primary_source_queries([task]))
+            
+            # Remove duplicates and limit
+            seen_queries = set()
+            unique_primary_queries = []
+            for q in primary_queries:
+                q_lower = q.lower().strip()
+                if q_lower not in seen_queries:
+                    seen_queries.add(q_lower)
+                    unique_primary_queries.append(q)
+            
+            # Try a few more queries
+            queries_to_try = unique_primary_queries[attempt*2:(attempt+1)*2]
+            
+            if not queries_to_try:
+                break
+                
+            logger.debug(f"Attempt {attempt+1}: Trying {len(queries_to_try)} additional primary queries")
+            
+            for query in queries_to_try:
+                try:
+                    search_result = web_search.invoke({
+                        "query": query,
+                        "max_results": plan.minimum_results
+                    })
+                    
+                    if not search_result.get("success"):
+                        continue
+                    
+                    results_list = search_result.get("results", [])
+                    
+                    for result in results_list:
+                        url = result.get("url", "")
+                        if not url:
+                            continue
+                            
+                        # Check if we already have this competitor
+                        title = result.get("title", "")
+                        snippet = result.get("snippet", "")
+                        
+                        name = extract_competitor_name(title, url, snippet)
+                        if not name or any(comp.name.lower() == name.lower() for comp in existing_competitors + additional_competitors):
+                            continue
+                        
+                        # Extract competitor info
+                        competitor = self._extract_competitor_info(result, set(), skip_low_quality=False)
+                        if competitor and competitor.source_quality and competitor.source_quality.value == "primary":
+                            additional_competitors.append(competitor)
+                            primary_count += 1
+                            logger.info(f"✓ Found additional primary source competitor: {competitor.name}")
+                            
+                            if primary_count >= global_config.min_primary_sources:
+                                break
+                    
+                    if primary_count >= global_config.min_primary_sources:
+                        break
+                        
+                except Exception as e:
+                    logger.warning(f"Error in primary source expansion query '{query}': {e}")
+                    continue
+        
+        logger.info(f"Primary source expansion complete. Found {len(additional_competitors)} additional competitors")
+        return additional_competitors
+    
+    def _find_primary_sources_for_competitors(self, competitors: list[CompetitorProfile]) -> list[CompetitorProfile]:
+        """Find and update primary sources for competitors by searching official websites.
+        
+        Performs targeted searches for each competitor's official website to ensure
+        primary sources are available. Updates existing competitors with primary
+        source quality when found.
+        
+        Args:
+            competitors: List of collected competitors
+        
+        Returns:
+            Updated list of competitors with primary sources where found
+        """
+        updated_competitors = []
+        
+        for comp in competitors:
+            if comp.source_quality and comp.source_quality.value == "primary":
+                updated_competitors.append(comp)
+                continue
+            
+            # Search for official website
+            query = f"official website {comp.name}"
+            try:
+                search_result = web_search.invoke({"query": query, "max_results": 3})
+                
+                if search_result.get("success"):
+                    primary_found = False
+                    for result in search_result.get("results", []):
+                        url = result.get("url", "")
+                        title = result.get("title", "")
+                        
+                        if url and self._is_likely_primary_source(url, title, comp.name):
+                            # Update competitor with primary source
+                            updated_comp = comp.model_copy()
+                            updated_comp.source_quality = SourceQuality.PRIMARY
+                            updated_comp.source_url = url
+                            updated_comp.website = url
+                            updated_comp.sources = [url]
+                            updated_competitors.append(updated_comp)
+                            logger.info(f"Updated {comp.name} with primary source: {url}")
+                            primary_found = True
+                            break
+                    
+                    if not primary_found:
+                        updated_competitors.append(comp)
+                else:
+                    updated_competitors.append(comp)
+                    
+            except Exception as e:
+                logger.warning(f"Error finding primary source for {comp.name}: {e}")
+                updated_competitors.append(comp)
+        
+        return updated_competitors
+    
+    def _is_likely_primary_source(self, url: str, title: str, competitor_name: str) -> bool:
+        """Check if URL is likely a primary source for the competitor.
+        
+        Args:
+            url: The URL to check
+            title: The page title
+            competitor_name: Name of the competitor
+        
+        Returns:
+            True if likely primary source, False otherwise
+        """
+        try:
+            analyzer = SourceQualityAnalyzer()
+            quality = analyzer.analyze(url)
+            return quality.value == "primary"
+        except Exception:
+            return False
+    
+    def _calculate_source_statistics(self, competitors: list[CompetitorProfile]) -> dict[str, Any]:
+        """Calculate detailed source statistics.
+        
+        Args:
+            competitors: List of collected competitors
+        
+        Returns:
+            Dictionary with detailed source statistics
+        """
+        from collections import Counter
+        
+        quality_counts = Counter()
+        verification_counts = Counter()
+        
+        for comp in competitors:
+            # Count source qualities
+            if comp.source_quality:
+                quality_counts[comp.source_quality.value] += 1
+            
+            # Count verification statuses
+            if comp.data_verification_status:
+                for metric, status in comp.data_verification_status.items():
+                    verification_counts[f"{metric}_{status}"] += 1
+        
+        return {
+            "quality_distribution": dict(quality_counts),
+            "verification_distribution": dict(verification_counts),
+            "total_competitors": len(competitors),
+            "total_sources": len([c for c in competitors if c.source_url])
+        }
+    
+    def _should_skip_low_quality(self, competitors: list[CompetitorProfile]) -> bool:
+        """Check if we should skip low-quality sources based on existing high-quality sources.
+        
+        Args:
+            competitors: Already collected competitors
+        
+        Returns:
+            True if we should skip low-quality sources
+        """
+        if not competitors:
+            return False
+        
+        # Count high-quality sources
+        high_quality_count = sum(
+            1 for comp in competitors
+            if comp.source_quality and comp.source_quality.value in ["primary", "secondary_high", "secondary_medium"]
+        )
+        
+        return high_quality_count >= self._get_global_config().max_low_quality_before_skip
+    
     def _extract_competitor_info(
         self,
         search_result: dict[str, Any],
-        seen_names: set[str]
+        seen_names: set[str],
+        skip_low_quality: bool = False
     ) -> CompetitorProfile | None:
         """Extract competitor information from search result.
         
         Args:
             search_result: Search result dictionary with url, title, snippet
             seen_names: Set of competitor names already collected (for deduplication)
+            skip_low_quality: Whether to skip low-quality sources (secondary_low, community)
         
         Returns:
             CompetitorProfile object or None if extraction fails
@@ -478,6 +830,75 @@ class DataCollectorAgent(BaseAgent):
                 return None
             source_url = sanitized_url
             
+            # Analyze source quality
+            source_quality = None
+            try:
+                analyzer = SourceQualityAnalyzer()
+                source_quality = analyzer.analyze(str(source_url))
+                if source_quality.value in ["secondary_low", "community"]:
+                    logger.debug(
+                        f"Low quality source detected for competitor '{name}': "
+                        f"{source_quality.value} - {source_url}"
+                    )
+                    if skip_low_quality:
+                        logger.debug(f"Skipping low-quality source as requested: {source_url}")
+                        return None
+            except Exception as e:
+                logger.warning(
+                    f"Failed to analyze source quality for {source_url}: {e}. "
+                    "Continuing without source quality classification."
+                )
+            
+            # Verify quantitative data
+            data_verification_status = None
+            try:
+                verification_service = DataVerificationService()
+                source_content = f"{title} {snippet}" if title and snippet else (snippet or title or "")
+                
+                # Check if we should scrape for verification
+                should_scrape = (
+                    self._get_global_config().scrape_for_verification and
+                    source_quality and
+                    source_content and
+                    any(metrics.values())  # Has quantitative data
+                )
+                
+                if should_scrape:
+                    # Check quality threshold
+                    quality_levels = ["primary", "secondary_high", "secondary_medium", "secondary_low", "community"]
+                    global_config = self._get_global_config()
+                    min_quality_index = quality_levels.index(global_config.scrape_quality_threshold)
+                    current_quality_index = quality_levels.index(source_quality.value)
+                    
+                    if current_quality_index <= min_quality_index:
+                        try:
+                            logger.debug(f"Scraping full page for verification: {source_url}")
+                            scrape_result = scrape_url.invoke({"url": source_url})
+                            if scrape_result.get("success"):
+                                scraped_content = scrape_result.get("content", "")
+                                if scraped_content:
+                                    source_content = f"{source_content} {scraped_content}"
+                                    logger.debug(f"Added scraped content ({len(scraped_content)} chars) for verification")
+                        except Exception as e:
+                            logger.warning(f"Failed to scrape {source_url} for verification: {e}")
+                
+                if source_content:
+                    competitor_data = {
+                        "market_share": metrics.get("market_share"),
+                        "revenue": metrics.get("revenue"),
+                        "user_count": metrics.get("user_count"),
+                        "founded_year": metrics.get("founded_year"),
+                    }
+                    data_verification_status = verification_service.verify_quantitative_data(
+                        competitor_data,
+                        source_content
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to verify data for competitor '{name}': {e}. "
+                    "Continuing without data verification."
+                )
+            
             competitor = CompetitorProfile(
                 name=name,
                 website=website,
@@ -489,7 +910,9 @@ class DataCollectorAgent(BaseAgent):
                 user_count=metrics.get("user_count"),
                 founded_year=metrics.get("founded_year"),
                 headquarters=metrics.get("headquarters"),
-                key_features=metrics.get("key_features", [])
+                key_features=metrics.get("key_features", []),
+                source_quality=source_quality,
+                data_verification_status=data_verification_status,
             )
             
             logger.debug(f"Successfully extracted competitor: {name}")

@@ -60,7 +60,7 @@ def initialize_langsmith(config: Any) -> None:
     
     try:
         import langsmith
-        
+
         # Validate API key is provided
         if not config.langsmith_api_key:
             raise ValueError(
@@ -262,7 +262,7 @@ def run_analysis(
         raise RuntimeError(f"Workflow creation failed: {e}") from e
     
     try:
-        initial_state = create_initial_state(user_query)
+        initial_state = create_initial_state(user_query, user_query)
         logger.info(f"Starting analysis for query: {user_query[:100]}...")
     except Exception as e:
         logger.error(f"Failed to create initial state: {e}")

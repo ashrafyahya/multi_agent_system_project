@@ -77,14 +77,14 @@ class TestWorkflowBuilder:
         # Test collector validation
         state["collected_data"] = {
             "competitors": [
-                {"name": "Comp1", "source_url": "https://example.com"},
-                {"name": "Comp2", "source_url": "https://example2.com"},
-                {"name": "Comp3", "source_url": "https://example3.com"},
-                {"name": "Comp4", "source_url": "https://example4.com"},
+                {"name": "Comp1", "source_url": "https://example.com", "source_quality": "primary"},
+                {"name": "Comp2", "source_url": "https://example2.com", "source_quality": "primary"},
+                {"name": "Comp3", "source_url": "https://example3.com", "source_quality": "secondary_high"},
+                {"name": "Comp4", "source_url": "https://example4.com", "source_quality": "secondary_high"},
             ]
         }
         decision = _validate_collector_output(state, max_retries=3)
-        assert decision in ["insight", "retry", END]
+        assert decision in ["insight", "retry", "validate_source_quality", END]
         
         # Test insight validation
         state["insights"] = {
@@ -111,8 +111,9 @@ class TestValidatorImmutability:
     
     def test_validate_insight_output_does_not_mutate_state(self) -> None:
         """Test that _validate_insight_output doesn't mutate input state."""
-        from src.graph.workflow import _validate_insight_output
         import copy
+
+        from src.graph.workflow import _validate_insight_output
         
         state = create_initial_state("Test")
         state["insights"] = {
@@ -142,8 +143,9 @@ class TestValidatorImmutability:
     
     def test_validate_collector_output_does_not_mutate_state(self) -> None:
         """Test that _validate_collector_output doesn't mutate input state."""
-        from src.graph.workflow import _validate_collector_output
         import copy
+
+        from src.graph.workflow import _validate_collector_output
         
         state = create_initial_state("Test")
         state["collected_data"] = {
@@ -164,8 +166,9 @@ class TestValidatorImmutability:
     
     def test_validate_report_output_does_not_mutate_state(self) -> None:
         """Test that _validate_report_output doesn't mutate input state."""
-        from src.graph.workflow import _validate_report_output
         import copy
+
+        from src.graph.workflow import _validate_report_output
         
         state = create_initial_state("Test")
         state["report"] = "This is a valid report with sufficient length"
@@ -181,8 +184,9 @@ class TestValidatorImmutability:
     
     def test_store_validation_warnings_uses_state_helpers(self) -> None:
         """Test that _store_validation_warnings uses state helpers immutably."""
-        from src.graph.workflow import _store_validation_warnings
         import copy
+
+        from src.graph.workflow import _store_validation_warnings
         
         state = create_initial_state("Test")
         state["collected_data"] = {
@@ -279,6 +283,14 @@ class TestValidatorImmutability:
         state = create_initial_state("Test")
         state["plan"] = {"tasks": ["Find competitors"]}
         state["retry_count"] = 3
+        state["validation_errors"] = ["Error 1", "Error 2"]
+        
+        decision = _supervisor_decision(state, max_retries=3)
+        assert decision == END
+        state["validation_errors"] = ["Error 1", "Error 2"]
+        
+        decision = _supervisor_decision(state, max_retries=3)
+        assert decision == END
         state["validation_errors"] = ["Error 1", "Error 2"]
         
         decision = _supervisor_decision(state, max_retries=3)

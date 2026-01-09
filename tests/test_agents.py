@@ -2431,8 +2431,10 @@ class TestExportAgent:
                         mock_matplotlib.pyplot = mock_pyplot
                         mock_matplotlib.patches = MagicMock()
                         
-                        with patch.dict(sys.modules, {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_pyplot, "matplotlib.patches": mock_matplotlib.patches}):
-                            with patch("numpy.arange", return_value=[0, 1]):
+                        mock_numpy = MagicMock()
+                        mock_numpy.arange = MagicMock(return_value=[0, 1])
+                        
+                        with patch.dict(sys.modules, {"matplotlib": mock_matplotlib, "matplotlib.pyplot": mock_pyplot, "matplotlib.patches": mock_matplotlib.patches, "numpy": mock_numpy}):
                                 state = create_initial_state("Test")
                                 state["report"] = "# Report\n## Summary\nTest content"
                                 state["insights"] = {

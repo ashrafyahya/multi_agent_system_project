@@ -47,6 +47,8 @@ The system uses LangGraph to orchestrate these agents through a stateful workflo
 - 🔧 **Type Safety**: Full type hints throughout the codebase
 - 📚 **Well Documented**: Google-style docstrings with usage examples
 - 📋 **Agent Output Logging**: Automatic logging of agent outputs to timestamped files for debugging and analysis
+- 🔍 **Source Quality Validation**: Automatic classification of source quality (primary, secondary high/medium/low, community) with warnings for low-quality sources
+- ✅ **Data Verification**: Automatic verification of quantitative data against source content, distinguishing between verified, estimated, and not-found data
 
 ## Architecture
 
@@ -354,6 +356,49 @@ The system supports integration with [LangSmith](https://smith.langchain.com/) f
 - **Optimization**: Identify bottlenecks and optimize agent prompts
 
 LangSmith integration is automatic once enabled - all LangChain operations will be traced without any code changes.
+
+### Source Quality Validation and Data Verification
+
+The system automatically classifies source quality and verifies quantitative data to ensure report credibility:
+
+**Source Quality Classification:**
+- **PRIMARY**: Official sources (government sites, financial reports, educational institutions)
+- **SECONDARY_HIGH**: Renowned market research institutes (Gartner, Forrester, IDC, Bloomberg, Reuters)
+- **SECONDARY_MEDIUM**: Tech news sites, trade journals
+- **SECONDARY_LOW**: Marketing blogs, company blogs
+- **COMMUNITY**: Community discussions (Reddit, forums)
+
+**Data Verification:**
+- Automatically verifies if quantitative data (market share, revenue, user count) appears in source content
+- Classifies data as:
+  - **verified**: Found in source content
+  - **estimated**: Extrapolated or estimated
+  - **not_found**: Not found in source content
+
+**Configuration:**
+```env
+# Source quality validation
+MIN_PRIMARY_SOURCES=2  # Minimum number of primary sources required
+MAX_LOW_QUALITY_SOURCES_RATIO=0.5  # Maximum ratio of low-quality sources (0.0-1.0)
+
+# Data verification
+ENABLE_DATA_VERIFICATION=true  # Enable/disable data verification
+DATA_VERIFICATION_TIMEOUT=10.0  # Timeout for LLM calls in seconds
+SOURCE_QUALITY_CACHE_SIZE=1000  # Cache size for URL classifications
+```
+
+**Features:**
+- Automatic source quality analysis using URL pattern matching (KISS principle)
+- Non-blocking validation: warnings are generated but don't stop workflow
+- Source quality statistics included in report methodology
+- Data verification status displayed for each quantitative metric
+- Warnings for insufficient primary sources or too many low-quality sources
+
+**Example:**
+Reports automatically include source quality statistics and data verification status:
+- "Source quality distribution: 5 primary sources, 3 marketing blogs"
+- "Data verification: 12 verified metrics, 5 estimates"
+- Quantitative data marked with verification status: "35% market share [1] (verified)"
 
 ## Usage
 
@@ -818,7 +863,41 @@ Or set `LOG_LEVEL=DEBUG` in `.env` file.
 
 ## Version History
 
-### Version 2.1.0 (Current)
+### Version 2.2.0 (Current)
+
+**Major Updates:**
+- 🔍 **Source Quality Validation**: Automatic classification of data sources (PRIMARY, SECONDARY_HIGH, SECONDARY_MEDIUM, SECONDARY_LOW, COMMUNITY)
+- ✅ **Data Verification System**: Automatic verification of quantitative data against source content (verified, estimated, not_found)
+- 📋 **Enhanced Report Methodology**: Reports include original user query, source quality statistics, and data verification metrics
+- 🎯 **Primary Source Search**: Automatic generation of primary-source-specific queries (government/SEC filings, investor relations)
+- 🛡️ **Source Quality Warnings**: Non-blocking validation warnings for data quality issues
+
+**New Features:**
+- **Source Quality Classification**: URLs automatically classified using pattern matching with LRU cache (1000 entries)
+- **Data Verification Service**: Pattern-based verification of quantitative metrics (market_share, revenue, user_count, founded_year)
+- **SourceQualityValidator**: Non-blocking validator that warns about insufficient primary sources or excessive low-quality sources
+- **Enhanced DataCollectorAgent**: Source quality analysis, data verification, and primary source prioritization
+- **Enhanced ReportAgent**: Source quality statistics, data verification status, and methodology transparency
+- **Workflow Integration**: New `validate_source_quality` node with non-blocking validation
+
+**Configuration Additions:**
+- `MIN_PRIMARY_SOURCES=2` - Minimum number of primary sources required
+- `MAX_LOW_QUALITY_SOURCES_RATIO=0.5` - Maximum ratio of low-quality sources
+- `ENABLE_DATA_VERIFICATION=true` - Enable/disable data verification
+- `DATA_VERIFICATION_TIMEOUT=10.0` - LLM timeout for verification
+- `SOURCE_QUALITY_CACHE_SIZE=1000` - Cache size for URL classifications
+- `PRIMARY_SOURCE_SEARCH_ENABLED=true` - Enable primary source queries
+- `SCRAPE_FOR_VERIFICATION=true` - Scrape pages for verification
+- `AUTO_EXPAND_PRIMARY_SOURCES=true` - Auto-expand search for primary sources
+
+**Benefits:**
+- Ensures reports based on reliable sources
+- Distinguishes verified vs estimated data
+- Transparent about data quality and source reliability
+- Automatic quality checks without blocking workflow
+- Reproducible analysis with detailed methodology
+
+### Version 2.1.0
 
 **Major Updates:**
 - ✨ **Code Quality Improvements**: Comprehensive improvements from implementation plan (Tasks 1-12)

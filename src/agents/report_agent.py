@@ -21,6 +21,7 @@ from src.graph.state import WorkflowState
 from src.graph.state_utils import update_state
 from src.models.insight_model import Insight
 from src.models.report_model import Report
+from src.models.source_quality import SourceQuality
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +183,12 @@ class ReportAgent(BaseAgent):
         """
         summary_parts = ["Business Insights for Report Generation:\n"]
         
+        # Add original user query for transparency
+        user_query = state.get("user_query")
+        if user_query:
+            summary_parts.append(f"Original User Query: {user_query}")
+            summary_parts.append("")
+        
         summary_parts.append("\nSWOT Analysis:")
         summary_parts.append(f"  Strengths: {', '.join(insights.swot.strengths[:5])}")
         summary_parts.append(f"  Weaknesses: {', '.join(insights.swot.weaknesses[:5])}")
@@ -214,6 +221,53 @@ class ReportAgent(BaseAgent):
                         "and monetary amounts. Include source citations for all quantitative claims using "
                         "the source URLs provided above."
                     )
+                
+                # Add source quality statistics
+                source_quality_stats = self._calculate_source_quality_stats(competitors)
+                if source_quality_stats:
+                    summary_parts.append("\n\nSource Quality Statistics:")
+                    summary_parts.append(source_quality_stats)
+                
+                # Add data verification statistics
+                verification_stats = self._calculate_verification_stats(competitors)
+                if verification_stats:
+                    summary_parts.append("\n\nData Verification Statistics:")
+                    summary_parts.append(verification_stats)
+        
+        # Add data collection timestamp and source statistics
+        timestamp = state.get("data_collection_timestamp")
+        if timestamp:
+            summary_parts.append(f"\n\nData Collection Timestamp: {timestamp}")
+        
+        source_stats = state.get("source_statistics")
+        if source_stats:
+            summary_parts.append("\n\nDetailed Source Statistics:")
+            summary_parts.append(f"  Total competitors analyzed: {source_stats.get('total_competitors', 0)}")
+            summary_parts.append(f"  Total sources with URLs: {source_stats.get('total_sources', 0)}")
+            
+            quality_dist = source_stats.get("quality_distribution", {})
+            if quality_dist:
+                summary_parts.append("  Source quality breakdown:")
+                for quality, count in quality_dist.items():
+                    summary_parts.append(f"    - {quality}: {count}")
+            
+            verification_dist = source_stats.get("verification_distribution", {})
+            if verification_dist:
+                summary_parts.append("  Data verification breakdown:")
+                for metric_status, count in verification_dist.items():
+                    summary_parts.append(f"    - {metric_status}: {count}")
+        
+        # Add source quality warnings from state
+        source_quality_warnings = state.get("source_quality_warnings", [])
+        if source_quality_warnings:
+            summary_parts.append("\n\nSource Quality Warnings:")
+            summary_parts.append("The following source quality issues were detected:")
+            for warning in source_quality_warnings:
+                summary_parts.append(f"  - {warning}")
+            summary_parts.append(
+                "\nIMPORTANT: Acknowledge these source quality warnings in the methodology section. "
+                "Be cautious when citing data from low-quality sources (marketing blogs, community discussions)."
+            )
         
         self._format_validation_warnings(state, summary_parts)
         self._format_source_urls(source_urls, summary_parts)
@@ -274,22 +328,30 @@ class ReportAgent(BaseAgent):
         
         market_share = comp.get("market_share")
         if market_share is not None:
-            comp_info.append(f"    - Market Share: {market_share}%")
+            verification_status = self._get_verification_status(comp, "market_share")
+            status_marker = f" [{verification_status}]" if verification_status else ""
+            comp_info.append(f"    - Market Share: {market_share}%{status_marker}")
         
         revenue = comp.get("revenue")
         if revenue is not None:
+            verification_status = self._get_verification_status(comp, "revenue")
+            status_marker = f" [{verification_status}]" if verification_status else ""
             if isinstance(revenue, (int, float)):
-                comp_info.append(f"    - Revenue: ${revenue:,.0f}")
+                comp_info.append(f"    - Revenue: ${revenue:,.0f}{status_marker}")
             else:
-                comp_info.append(f"    - Revenue: {revenue}")
+                comp_info.append(f"    - Revenue: {revenue}{status_marker}")
         
         user_count = comp.get("user_count")
         if user_count is not None:
-            comp_info.append(f"    - User Count: {user_count}")
+            verification_status = self._get_verification_status(comp, "user_count")
+            status_marker = f" [{verification_status}]" if verification_status else ""
+            comp_info.append(f"    - User Count: {user_count}{status_marker}")
         
         founded_year = comp.get("founded_year")
         if founded_year is not None:
-            comp_info.append(f"    - Founded: {founded_year}")
+            verification_status = self._get_verification_status(comp, "founded_year")
+            status_marker = f" [{verification_status}]" if verification_status else ""
+            comp_info.append(f"    - Founded: {founded_year}{status_marker}")
         
         headquarters = comp.get("headquarters")
         if headquarters:
@@ -306,7 +368,8 @@ class ReportAgent(BaseAgent):
         excluded_keys = [
             "name", "website", "source_url", "pricing", "market_presence",
             "products", "market_share", "revenue", "user_count",
-            "founded_year", "headquarters", "key_features"
+            "founded_year", "headquarters", "key_features",
+            "source_quality", "data_verification_status"
         ]
         
         for key, value in comp.items():
@@ -1017,6 +1080,161 @@ class ReportAgent(BaseAgent):
         
         final_report = "".join(sections)
         return final_report
+    
+    def _get_verification_status(
+        self,
+        comp: dict[str, Any],
+        metric_name: str,
+    ) -> str | None:
+        """Get verification status for a specific metric.
+        
+        Args:
+            comp: Competitor dictionary
+            metric_name: Name of the metric (e.g., "market_share")
+            
+        Returns:
+            Verification status string ("verified", "estimated", "not_found") or None
+        """
+        verification_status = comp.get("data_verification_status")
+        if not isinstance(verification_status, dict):
+            return None
+        
+        return verification_status.get(metric_name)
+    
+    def _calculate_source_quality_stats(
+        self,
+        competitors: list[dict[str, Any]],
+    ) -> str | None:
+        """Calculate source quality statistics from competitors.
+        
+        Args:
+            competitors: List of competitor dictionaries
+            
+        Returns:
+            Formatted string with source quality statistics or None
+        """
+        quality_counts: dict[SourceQuality | str, int] = {
+            SourceQuality.PRIMARY: 0,
+            SourceQuality.SECONDARY_HIGH: 0,
+            SourceQuality.SECONDARY_MEDIUM: 0,
+            SourceQuality.SECONDARY_LOW: 0,
+            SourceQuality.COMMUNITY: 0,
+        }
+        
+        sources_with_quality = 0
+        
+        for comp in competitors:
+            if not isinstance(comp, dict):
+                continue
+            
+            source_quality = comp.get("source_quality")
+            if source_quality is None:
+                continue
+            
+            # Handle both enum and string values
+            if isinstance(source_quality, str):
+                try:
+                    source_quality = SourceQuality(source_quality)
+                except ValueError:
+                    continue
+            
+            if isinstance(source_quality, SourceQuality):
+                quality_counts[source_quality] += 1
+                sources_with_quality += 1
+        
+        if sources_with_quality == 0:
+            return None
+        
+        stats_parts: list[str] = []
+        stats_parts.append(
+            f"Source quality distribution ({sources_with_quality} sources with quality information):"
+        )
+        
+        if quality_counts[SourceQuality.PRIMARY] > 0:
+            stats_parts.append(
+                f"  - Primary sources: {quality_counts[SourceQuality.PRIMARY]} "
+                "(official government sites, financial reports, educational institutions)"
+            )
+        if quality_counts[SourceQuality.SECONDARY_HIGH] > 0:
+            stats_parts.append(
+                f"  - High-quality secondary sources: {quality_counts[SourceQuality.SECONDARY_HIGH]} "
+                "(renowned market research institutes: Gartner, Forrester, IDC, etc.)"
+            )
+        if quality_counts[SourceQuality.SECONDARY_MEDIUM] > 0:
+            stats_parts.append(
+                f"  - Medium-quality secondary sources: {quality_counts[SourceQuality.SECONDARY_MEDIUM]} "
+                "(tech news sites, trade journals)"
+            )
+        if quality_counts[SourceQuality.SECONDARY_LOW] > 0:
+            stats_parts.append(
+                f"  - Low-quality secondary sources: {quality_counts[SourceQuality.SECONDARY_LOW]} "
+                "(marketing blogs, company blogs)"
+            )
+        if quality_counts[SourceQuality.COMMUNITY] > 0:
+            stats_parts.append(
+                f"  - Community sources: {quality_counts[SourceQuality.COMMUNITY]} "
+                "(Reddit, forums, community discussions)"
+            )
+        
+        stats_parts.append(
+            "\nIMPORTANT: Include these source quality statistics in the methodology section. "
+            "Be transparent about the quality of sources used in the analysis."
+        )
+        
+        return "\n".join(stats_parts)
+    
+    def _calculate_verification_stats(
+        self,
+        competitors: list[dict[str, Any]],
+    ) -> str | None:
+        """Calculate data verification statistics from competitors.
+        
+        Args:
+            competitors: List of competitor dictionaries
+            
+        Returns:
+            Formatted string with verification statistics or None
+        """
+        total_metrics = 0
+        verified_count = 0
+        estimated_count = 0
+        not_found_count = 0
+        
+        for comp in competitors:
+            if not isinstance(comp, dict):
+                continue
+            
+            verification_status = comp.get("data_verification_status")
+            if not isinstance(verification_status, dict):
+                continue
+            
+            for metric_name, status in verification_status.items():
+                total_metrics += 1
+                if status == "verified":
+                    verified_count += 1
+                elif status == "estimated":
+                    estimated_count += 1
+                elif status == "not_found":
+                    not_found_count += 1
+        
+        if total_metrics == 0:
+            return None
+        
+        stats_parts: list[str] = []
+        stats_parts.append(
+            f"Data verification status ({total_metrics} quantitative metrics analyzed):"
+        )
+        stats_parts.append(f"  - Verified: {verified_count} (found in source content)")
+        stats_parts.append(f"  - Estimated: {estimated_count} (extrapolated or estimated)")
+        stats_parts.append(f"  - Not found: {not_found_count} (not found in source content)")
+        
+        stats_parts.append(
+            "\nIMPORTANT: Include these verification statistics in the methodology section. "
+            "Clearly distinguish between verified quantitative data and estimated/extrapolated data "
+            "in the report. Mark estimated data with appropriate disclaimers."
+        )
+        
+        return "\n".join(stats_parts)
     
     @property
     def name(self) -> str:

@@ -256,6 +256,23 @@ class DataConsistencyValidator(BaseValidator):
                         )
                 except (ValueError, TypeError):
                     continue
+            
+            # Check market size claims (if available in data_verification_status)
+            data_verification = comp.get("data_verification_status")
+            if data_verification and isinstance(data_verification, dict):
+                market_share = comp.get("market_share")
+                revenue = comp.get("revenue")
+                
+                # If market data exists but is not verified, add warning
+                if market_share is not None and data_verification.get("market_share") == "not_found":
+                    result.add_warning(
+                        f"{name}: Market share claim ({market_share}%) cannot be verified - consider as estimate"
+                    )
+                
+                if revenue is not None and data_verification.get("revenue") == "not_found":
+                    result.add_warning(
+                        f"{name}: Revenue claim ({revenue}) cannot be verified - consider as estimate"
+                    )
     
     def _validate_conflicting_data(
         self,
